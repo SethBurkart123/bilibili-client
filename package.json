@@ -1,0 +1,8 @@
+{
+  "name": "bilibili-client",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}

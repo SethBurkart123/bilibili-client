@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+.claude/worktrees/
+bun.lock
+bun.lockb
+package-lock.json
+*.log
+.DS_Store
