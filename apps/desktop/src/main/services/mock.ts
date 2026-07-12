@@ -1,11 +1,16 @@
 import type {
+  ChannelInfo,
+  ChannelVideosPage,
   LoginPollResult,
   LoginQr,
   LoginState,
+  SearchUsersPage,
+  SearchVideosPage,
   SubtitleLine,
   SubtitleTrackInfo,
   TranslateOptions,
   TranslatorSettings,
+  VideoCard,
   VideoId,
   VideoInfo,
 } from "@bili/types";
@@ -27,6 +32,45 @@ function delay(ms: number): Promise<void> {
 function latency(): Promise<void> {
   return delay(150 + Math.floor(Math.random() * 251));
 }
+
+const MOCK_CHANNEL_VIDEOS: VideoCard[] = [
+  {
+    bvid: "BV1xx411c7mD",
+    aid: 170001,
+    title: "【双语字幕】深入浅出：Electron 桌面应用从零到一",
+    pic: "https://example.invalid/cover/BV1xx411c7mD.jpg",
+    duration: 1265,
+    pubdate: 1719800000,
+    views: 1_284_532,
+    danmaku: 8_421,
+    authorName: "码农小明",
+    authorMid: 208259,
+  },
+  {
+    bvid: "BV1yy411c8nE",
+    aid: 170002,
+    title: "IPC 通信实战：主进程与渲染进程协作",
+    pic: "https://example.invalid/cover/BV1yy411c8nE.jpg",
+    duration: 842,
+    pubdate: 1717200000,
+    views: 456_200,
+    danmaku: 2_110,
+    authorName: "码农小明",
+    authorMid: 208259,
+  },
+  {
+    bvid: "BV1zz411c9pF",
+    aid: 170003,
+    title: "打包发布指南：macOS / Windows / Linux",
+    pic: "https://example.invalid/cover/BV1zz411c9pF.jpg",
+    duration: 1104,
+    pubdate: 1714600000,
+    views: 298_800,
+    danmaku: 1_540,
+    authorName: "码农小明",
+    authorMid: 208259,
+  },
+];
 
 export class MockBiliService implements BiliBridge {
   private settings: TranslatorSettings = { ...DEFAULT_SETTINGS };
@@ -106,6 +150,72 @@ export class MockBiliService implements BiliBridge {
   async getSubtitleLines(_url: string): Promise<SubtitleLine[]> {
     await latency();
     return [];
+  }
+
+  async getChannelInfo(mid: number): Promise<ChannelInfo> {
+    await latency();
+    return {
+      mid,
+      name: "码农小明",
+      face: "https://example.invalid/face/owner.jpg",
+      sign: "写点 Electron，看看 bilibili。",
+      follower: 128_400,
+    };
+  }
+
+  async getChannelVideos(_mid: number, _page: number): Promise<ChannelVideosPage> {
+    await latency();
+    return {
+      items: MOCK_CHANNEL_VIDEOS,
+      total: MOCK_CHANNEL_VIDEOS.length,
+      hasMore: false,
+    };
+  }
+
+  async searchVideos(keyword: string, page: number): Promise<SearchVideosPage> {
+    await latency();
+    const q = keyword.trim().toLowerCase();
+    const items = MOCK_CHANNEL_VIDEOS.filter((v) =>
+      q ? v.title.toLowerCase().includes(q) || v.bvid.toLowerCase().includes(q) : true,
+    ).slice(0, 2);
+    return {
+      items:
+        items.length > 0
+          ? items
+          : MOCK_CHANNEL_VIDEOS.slice(0, 2).map((v) => ({
+              ...v,
+              title: `${keyword} — ${v.title}`,
+            })),
+      hasMore: false,
+      page,
+    };
+  }
+
+  async searchUsers(keyword: string, page: number): Promise<SearchUsersPage> {
+    await latency();
+    const label = keyword.trim() || "uploader";
+    return {
+      items: [
+        {
+          mid: 208259,
+          name: "码农小明",
+          face: "https://example.invalid/face/owner.jpg",
+          sign: `Matches “${label}”`,
+          followers: 128_400,
+          videos: 42,
+        },
+        {
+          mid: 308260,
+          name: "前端阿花",
+          face: "https://example.invalid/face/user2.jpg",
+          sign: "React / Electron notes",
+          followers: 56_200,
+          videos: 18,
+        },
+      ],
+      hasMore: false,
+      page,
+    };
   }
 
   async loginQrStart(): Promise<LoginQr> {

@@ -9,10 +9,14 @@ import {
   withCache,
 } from "@bili/translate";
 import type {
+  ChannelInfo,
+  ChannelVideosPage,
   LoginPollResult,
   LoginQr,
   LoginState,
   PlayUrlResult,
+  SearchUsersPage,
+  SearchVideosPage,
   SubtitleLine,
   SubtitleTrackInfo,
   TranslateOptions,
@@ -157,6 +161,23 @@ export class RealBiliService implements BiliBridge {
 
   async getSubtitleLines(url: string): Promise<SubtitleLine[]> {
     return this.client.getSubtitleLines(url);
+  }
+
+  // Parallel channel/search lane owns the real API wiring.
+  async getChannelInfo(_mid: number): Promise<ChannelInfo> {
+    throw new Error("not wired yet — channel/search lane");
+  }
+
+  async getChannelVideos(_mid: number, _page: number): Promise<ChannelVideosPage> {
+    throw new Error("not wired yet — channel/search lane");
+  }
+
+  async searchVideos(_keyword: string, _page: number): Promise<SearchVideosPage> {
+    throw new Error("not wired yet — channel/search lane");
+  }
+
+  async searchUsers(_keyword: string, _page: number): Promise<SearchUsersPage> {
+    throw new Error("not wired yet — channel/search lane");
   }
 
   async loginQrStart(): Promise<LoginQr> {

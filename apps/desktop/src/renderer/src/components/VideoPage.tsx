@@ -3,12 +3,13 @@ import type { CommentItem, SubtitleLine, SubtitleTrackInfo, VideoInfo } from "@b
 import { addSubtitleTracks, feedPlayer, mergeDualLines, subtitleLinesToVtt } from "@bili/player";
 import type { FeedSubtitleTrack } from "@bili/player";
 import { bridge } from "../lib/bridge";
-import { formatCount } from "../lib/format";
+import { formatCount, parseCjkCount } from "../lib/format";
 import { CommentsPanel } from "./CommentsPanel";
 
 interface Props {
   video: VideoInfo;
   sessionEpoch: number;
+  settingsEpoch?: number;
 }
 
 const REFRESH_COOLDOWN_MS = 15_000;
@@ -104,13 +105,14 @@ async function seekAndPlay(iframe: HTMLIFrameElement, time: number): Promise<voi
   }
 }
 
-export function VideoPage({ video, sessionEpoch }: Props) {
+export function VideoPage({ video, sessionEpoch, settingsEpoch = 0 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [mpdXml, setMpdXml] = useState<string | null>(null);
   const [fed, setFed] = useState(false);
   const [titleEn, setTitleEn] = useState<string | null>(null);
   const [descEn, setDescEn] = useState<string | null>(null);
+  const [ownerEn, setOwnerEn] = useState<string | null>(null);
   const [showOriginalDesc, setShowOriginalDesc] = useState(false);
   const [translateComments, setTranslateComments] = useState(false);
   const [translations, setTranslations] = useState<Map<number, string>>(() => new Map());
@@ -191,6 +193,7 @@ export function VideoPage({ video, sessionEpoch }: Props) {
     setMetaError(null);
     setTitleEn(null);
     setDescEn(null);
+    setOwnerEn(null);
     setMpdXml(null);
     setFed(false);
     setTranslations(new Map());
@@ -209,7 +212,7 @@ export function VideoPage({ video, sessionEpoch }: Props) {
       try {
         const [{ mpdXml: xml }, translated, subs] = await Promise.all([
           bridge.getStreams({ bvid: video.bvid, aid: video.aid }, video.cid),
-          bridge.translate([video.title, video.desc], {
+          bridge.translate([video.title, video.desc, video.owner.name], {
             context: "bilibili video title and description",
           }),
           bridge.getSubtitles({ bvid: video.bvid, aid: video.aid }, video.cid),
@@ -237,6 +240,7 @@ export function VideoPage({ video, sessionEpoch }: Props) {
         setMpdXml(xml);
         setTitleEn(translated[0] ?? null);
         setDescEn(translated[1] ?? null);
+        setOwnerEn(translated[2] ?? null);
         setTracks(subs);
       } catch (err) {
         if (!cancelled) setMetaError(err instanceof Error ? err.message : String(err));
@@ -436,11 +440,14 @@ export function VideoPage({ video, sessionEpoch }: Props) {
         <div className="video-meta">
           <h1>{titleEn ?? video.title}</h1>
           {titleEn && <p className="original-title">{video.title}</p>}
-          <div className="uploader">{video.owner.name}</div>
+          <div className="uploader">
+            {video.owner.name}
+            {ownerEn && ownerEn !== video.owner.name && (
+              <span className="uploader-translated"> ({ownerEn})</span>
+            )}
+          </div>
           <div className="stats-row">
-            <span>{formatCount(video.stat.view)} views</span>
-            <span>{formatCount(video.stat.like)} likes</span>
-            <span>{formatCount(video.stat.reply)} comments</span>
+            {`${formatCount(parseCjkCount(video.stat.view))} views · ${formatCount(parseCjkCount(video.stat.like))} likes · ${formatCount(parseCjkCount(video.stat.reply))} comments`}
           </div>
           <div className="desc-block">
             <div className="desc-toolbar">
@@ -464,6 +471,7 @@ export function VideoPage({ video, sessionEpoch }: Props) {
         onTranslateToggle={setTranslateComments}
         translations={translations}
         onNeedTranslate={onNeedTranslate}
+        settingsEpoch={settingsEpoch}
       />
     </div>
   );

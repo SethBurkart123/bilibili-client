@@ -20,6 +20,10 @@ export function loadSettings(): TranslatorSettings {
       ...DEFAULT_SETTINGS,
       ...parsed,
       openai: parsed.openai ?? DEFAULT_SETTINGS.openai,
+      ui: {
+        ...DEFAULT_SETTINGS.ui,
+        ...parsed.ui,
+      },
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

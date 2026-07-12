@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CommentItem } from "@bili/types";
 import { bridge } from "../lib/bridge";
-import { relativeTime } from "../lib/format";
+import { formatCount, parseCjkCount, relativeTime } from "../lib/format";
 import { EmoteMessage } from "./EmoteMessage";
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
   onTranslateToggle: (on: boolean) => void;
   translations: Map<number, string>;
   onNeedTranslate: (items: CommentItem[]) => void;
+  settingsEpoch?: number;
 }
 
 function CommentRow({
@@ -18,12 +19,14 @@ function CommentRow({
   translateOn,
   translations,
   onNeedTranslate,
+  showOriginalOnHover,
 }: {
   item: CommentItem;
   aid: number;
   translateOn: boolean;
   translations: Map<number, string>;
   onNeedTranslate: (items: CommentItem[]) => void;
+  showOriginalOnHover: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [replies, setReplies] = useState<CommentItem[]>(item.replies);
@@ -51,42 +54,49 @@ function CommentRow({
     }
   }
 
+  const likeCount = formatCount(parseCjkCount(item.like));
+  const replyLabelCount = formatCount(parseCjkCount(item.replyCount));
+
   return (
-    <article className="comment-item">
+    <article
+      className={`comment-item${showOriginalOnHover ? " show-original-hover" : ""}`}
+    >
       <img className="avatar" src={item.author.avatar} alt="" />
       <div>
         <div className="comment-head">
           <span className="uname">{item.author.uname}</span>
           <span className="ctime">{relativeTime(item.ctime)}</span>
         </div>
-        <div className="comment-message">
-          {translateOn && translated ? (
-            translated
-          ) : (
-            <EmoteMessage message={item.message} emotes={item.emotes} />
+        <div className="comment-body">
+          <div className="comment-message">
+            {translateOn && translated ? (
+              translated
+            ) : (
+              <EmoteMessage message={item.message} emotes={item.emotes} />
+            )}
+          </div>
+          {translateOn && translated && (
+            <div
+              className={`comment-original${showOriginal ? " open" : ""}`}
+              onClick={() => setShowOriginal((v) => !v)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setShowOriginal((v) => !v);
+                }
+              }}
+            >
+              Original: <EmoteMessage message={item.message} emotes={item.emotes} />
+            </div>
           )}
         </div>
-        {translateOn && translated && (
-          <div
-            className={`comment-original${showOriginal ? " open" : ""}`}
-            onClick={() => setShowOriginal((v) => !v)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setShowOriginal((v) => !v);
-              }
-            }}
-          >
-            Original: <EmoteMessage message={item.message} emotes={item.emotes} />
-          </div>
-        )}
         <div className="comment-meta">
-          <span>👍 {item.like}</span>
+          <span>👍 {likeCount}</span>
           {item.replyCount > 0 && (
             <button type="button" className="linkish" onClick={() => void toggleReplies()}>
-              {expanded ? "Hide replies" : `${item.replyCount} replies`}
+              {expanded ? "Hide replies" : `${replyLabelCount} replies`}
             </button>
           )}
         </div>
@@ -101,6 +111,7 @@ function CommentRow({
                 translateOn={translateOn}
                 translations={translations}
                 onNeedTranslate={onNeedTranslate}
+                showOriginalOnHover={showOriginalOnHover}
               />
             ))}
           </div>
@@ -116,6 +127,7 @@ export function CommentsPanel({
   onTranslateToggle,
   translations,
   onNeedTranslate,
+  settingsEpoch = 0,
 }: Props) {
   const [items, setItems] = useState<CommentItem[]>([]);
   const [hots, setHots] = useState<CommentItem[]>([]);
@@ -125,8 +137,21 @@ export function CommentsPanel({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showOriginalOnHover, setShowOriginalOnHover] = useState(true);
   const onNeedTranslateRef = useRef(onNeedTranslate);
   onNeedTranslateRef.current = onNeedTranslate;
+
+  useEffect(() => {
+    let cancelled = false;
+    void bridge.getSettings().then((s) => {
+      if (!cancelled) {
+        setShowOriginalOnHover(s.ui?.showOriginalOnHover !== false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,7 +206,7 @@ export function CommentsPanel({
   return (
     <aside className="comments-panel">
       <div className="comments-header">
-        <h2>{allCount || "…"} comments</h2>
+        <h2>{allCount ? `${formatCount(parseCjkCount(allCount))} comments` : "… comments"}</h2>
         <button
           type="button"
           className={`toggle-btn${translateOn ? " active" : ""}`}
@@ -202,6 +227,7 @@ export function CommentsPanel({
             translateOn={translateOn}
             translations={translations}
             onNeedTranslate={onNeedTranslate}
+            showOriginalOnHover={showOriginalOnHover}
           />
         ))}
         {items.map((item) => (
@@ -212,6 +238,7 @@ export function CommentsPanel({
             translateOn={translateOn}
             translations={translations}
             onNeedTranslate={onNeedTranslate}
+            showOriginalOnHover={showOriginalOnHover}
           />
         ))}
         {!isEnd && !loading && (

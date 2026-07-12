@@ -13,6 +13,7 @@ interface Props {
   onClose: () => void;
   loginState: LoginState;
   onLoginStateChange: (state: LoginState) => void;
+  onSaved?: () => void;
 }
 
 const POLL_MS = 2000;
@@ -39,6 +40,7 @@ export function SettingsModal({
   onClose,
   loginState,
   onLoginStateChange,
+  onSaved,
 }: Props) {
   const titleId = useId();
   const [settings, setSettings] = useState<TranslatorSettings | null>(null);
@@ -74,6 +76,9 @@ export function SettingsModal({
       const payload: TranslatorSettings = {
         provider: settings.provider,
         targetLang: settings.targetLang.trim() || "en",
+        ui: {
+          showOriginalOnHover: settings.ui?.showOriginalOnHover !== false,
+        },
       };
       if (settings.provider === "openai") {
         payload.openai = {
@@ -83,6 +88,7 @@ export function SettingsModal({
         };
       }
       await bridge.setSettings(payload);
+      onSaved?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -191,6 +197,30 @@ export function SettingsModal({
                 setSettings((prev) => (prev ? { ...prev, targetLang: e.target.value } : prev))
               }
             />
+          </div>
+
+          <div className="form-field form-field-checkbox">
+            <label htmlFor="showOriginalOnHover">
+              <input
+                id="showOriginalOnHover"
+                type="checkbox"
+                checked={settings.ui?.showOriginalOnHover !== false}
+                onChange={(e) =>
+                  setSettings((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          ui: {
+                            ...prev.ui,
+                            showOriginalOnHover: e.target.checked,
+                          },
+                        }
+                      : prev,
+                  )
+                }
+              />
+              Show original on hover
+            </label>
           </div>
 
           {provider === "openai" && (

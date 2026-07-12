@@ -1,7 +1,36 @@
+/** Western abbreviations: 812 | 70.9K | 709K | 3.4M | 1.2B */
 export function formatCount(n: number): string {
-  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}亿`;
-  if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`;
-  return n.toLocaleString();
+  const value = Number.isFinite(n) ? Math.max(0, n) : 0;
+  if (value < 1_000) return String(Math.round(value));
+  if (value < 1_000_000) {
+    if (value < 100_000) {
+      return `${parseFloat((value / 1_000).toFixed(1))}K`;
+    }
+    return `${Math.round(value / 1_000)}K`;
+  }
+  if (value < 1_000_000_000) {
+    return `${parseFloat((value / 1_000_000).toFixed(1))}M`;
+  }
+  return `${parseFloat((value / 1_000_000_000).toFixed(1))}B`;
+}
+
+/** Parse bilibili-style counts ("70.9万", "3.4亿") or plain numbers. */
+export function parseCjkCount(s: string | number): number {
+  if (typeof s === "number") {
+    return Number.isFinite(s) ? s : 0;
+  }
+  const trimmed = s.trim();
+  if (!trimmed) return 0;
+  if (/万/.test(trimmed)) {
+    const n = Number.parseFloat(trimmed.replace(/万/g, ""));
+    return Number.isFinite(n) ? n * 10_000 : 0;
+  }
+  if (/亿/.test(trimmed)) {
+    const n = Number.parseFloat(trimmed.replace(/亿/g, ""));
+    return Number.isFinite(n) ? n * 100_000_000 : 0;
+  }
+  const n = Number.parseFloat(trimmed.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : 0;
 }
 
 export function relativeTime(ctime: number): string {

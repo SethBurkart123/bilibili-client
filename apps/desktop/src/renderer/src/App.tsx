@@ -24,6 +24,7 @@ export default function App() {
     face?: string;
   }>({ loggedIn: false });
   const [sessionEpoch, setSessionEpoch] = useState(0);
+  const [settingsEpoch, setSettingsEpoch] = useState(0);
 
   useEffect(() => {
     setRecent(loadRecent());
@@ -151,7 +152,11 @@ export default function App() {
           busy={busy}
         />
       ) : (
-        <VideoPage video={view.video} sessionEpoch={sessionEpoch} />
+        <VideoPage
+          video={view.video}
+          sessionEpoch={sessionEpoch}
+          settingsEpoch={settingsEpoch}
+        />
       )}
 
       <SettingsModal
@@ -159,6 +164,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         loginState={loginState}
         onLoginStateChange={onLoginStateChange}
+        onSaved={() => setSettingsEpoch((n) => n + 1)}
       />
     </div>
   );

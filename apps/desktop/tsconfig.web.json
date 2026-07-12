@@ -13,5 +13,6 @@
   "include": [
     "src/renderer/src/**/*",
     "src/renderer/global.d.ts"
-  ]
+  ],
+  "exclude": ["src/**/*.test.ts"]
 }

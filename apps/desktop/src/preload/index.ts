@@ -21,6 +21,13 @@ const bili: BiliBridge = {
   getSubtitles: (id: VideoId, cid: number) =>
     ipcRenderer.invoke("bili:getSubtitles", id, cid),
   getSubtitleLines: (url: string) => ipcRenderer.invoke("bili:getSubtitleLines", url),
+  getChannelInfo: (mid: number) => ipcRenderer.invoke("bili:getChannelInfo", mid),
+  getChannelVideos: (mid: number, page: number) =>
+    ipcRenderer.invoke("bili:getChannelVideos", mid, page),
+  searchVideos: (keyword: string, page: number) =>
+    ipcRenderer.invoke("bili:searchVideos", keyword, page),
+  searchUsers: (keyword: string, page: number) =>
+    ipcRenderer.invoke("bili:searchUsers", keyword, page),
   loginQrStart: () => ipcRenderer.invoke("bili:loginQrStart"),
   loginQrPoll: (qrcodeKey: string) => ipcRenderer.invoke("bili:loginQrPoll", qrcodeKey),
   getLoginState: () => ipcRenderer.invoke("bili:getLoginState"),
