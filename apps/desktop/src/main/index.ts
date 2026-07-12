@@ -4,6 +4,10 @@ import type { BiliBridge } from "./services/bridge";
 import { flushService, service } from "./services";
 import { DESKTOP_CHROME_UA } from "./services/stream-proxy";
 
+// Allow the embedded player to start without a click inside the iframe.
+// Must be set before app ready.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 const HEADER_HOST_PATTERNS = [
   /(^|\.)bilivideo\.com$/i,
   /(^|\.)akamaized\.net$/i,

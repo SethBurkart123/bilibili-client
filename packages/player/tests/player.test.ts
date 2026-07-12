@@ -147,6 +147,14 @@ describe("buildMpd", () => {
 
     assertWellFormedXml(mpd);
   });
+
+  test("derives a missing initialization range from the index range", () => {
+    const dash = structuredClone(fixture);
+    dash.video[0]!.segmentBase.initialization = "";
+    dash.video[0]!.segmentBase.indexRange = "999-1455";
+
+    expect(buildMpd(dash)).toContain('<Initialization range="0-998"/>');
+  });
 });
 
 describe("mpdToDataUri", () => {
@@ -196,6 +204,7 @@ describe("feedPlayer", () => {
     expect(msg.targetOrigin).toBe(origin);
     expect(msg.data.type).toBe("sources");
     expect(msg.data.autoSetSource).toBe(true);
+    expect((msg.data as { forceAutoplay?: boolean }).forceAutoplay).toBe(true);
     expect(msg.data.subtitles).toEqual([]);
     expect(msg.data.sources).toHaveLength(1);
     expect(msg.data.sources[0]!.mode).toBe(ACCELERATED_DASH);

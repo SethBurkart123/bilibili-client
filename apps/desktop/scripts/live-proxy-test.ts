@@ -18,20 +18,36 @@ try {
   const id = await client.parseVideoUrl(videoUrl);
   const view = await client.getView(id);
   const playUrl = await client.getPlayUrl(id, view.cid);
-  const track = playUrl.dash.video[0];
-  if (!track) throw new Error("playurl did not include a video track");
+  const videoTrack = playUrl.dash.video.find((track) => track.codecid === 7) ?? playUrl.dash.video[0];
+  const audioTrack = playUrl.dash.audio[0];
+  if (!videoTrack || !audioTrack) throw new Error("playurl did not include video and audio tracks");
 
   console.log(
     `PASS getPlayUrl -> ${playUrl.acceptQuality.map((quality) => `${quality} ${QN_LABELS[quality] ?? ""}`.trim()).join(", ")}`,
   );
-  const response = await fetch(proxyUrlForTrack(track.baseUrl, track.backupUrl), {
-    headers: { Range: "bytes=0-1023" },
-  });
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if ((response.status !== 200 && response.status !== 206) || bytes.byteLength === 0) {
-    throw new Error(`proxy returned HTTP ${response.status} with ${bytes.byteLength} bytes`);
+  for (const [kind, track] of [["video", videoTrack], ["audio", audioTrack]] as const) {
+    const url = proxyUrlForTrack(track.baseUrl, track.backupUrl);
+    const probe = await fetch(url, { headers: { Range: "bytes=0-1023" } });
+    const total = Number(probe.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]);
+    const probeBytes = new Uint8Array(await probe.arrayBuffer());
+    if (probe.status !== 206 || probeBytes.byteLength !== 1024 || !Number.isSafeInteger(total)) {
+      throw new Error(`${kind} probe returned HTTP ${probe.status} with ${probeBytes.byteLength} bytes`);
+    }
+
+    const chunkSize = 256 * 1024;
+    const ranges = Array.from({ length: 8 }, (_, i) => {
+      const start = Math.floor(((total - chunkSize) * (i + 1)) / 9);
+      return [start, start + chunkSize - 1] as const;
+    });
+    await Promise.all(ranges.map(async ([start, end]) => {
+      const response = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (response.status !== 206 || bytes.byteLength !== end - start + 1) {
+        throw new Error(`${kind} range ${start}-${end} returned HTTP ${response.status} with ${bytes.byteLength} bytes`);
+      }
+    }));
+    console.log(`PASS ${kind} concurrent ranges -> ${ranges.length} × ${chunkSize} bytes`);
   }
-  console.log(`PASS proxy range fetch -> HTTP ${response.status}, ${bytes.byteLength} bytes`);
 } finally {
   await proxy.stop();
 }

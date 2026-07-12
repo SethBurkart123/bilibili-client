@@ -13,10 +13,15 @@ interface Props {
   onOpenChannel?: (mid: number) => void;
 }
 
-const REFRESH_COOLDOWN_MS = 15_000;
-const STALL_GRACE_MS = 8_000;
+const REFRESH_COOLDOWN_MS = 12_000;
+const STALL_GRACE_MS = 6_000;
+/** How long the media element can sit in `waiting` before we re-fetch streams. */
+const WAITING_REFRESH_MS = 10_000;
+/** How long currentTime can freeze while "playing" before treating as a hang. */
+const FREEZE_REFRESH_MS = 12_000;
 const TRANSLATE_BATCH = 50;
-const PLAYER_SRC = "/player/index.html";
+const PLAYER_SRC = "./player/index.html";
+const PLAYER_READY_TIMEOUT_MS = 12_000;
 const EN_LABEL = "English (translated)";
 const DUAL_LABEL = "Dual (EN + 中文)";
 
@@ -87,23 +92,88 @@ async function ensureOriginalCached(
   return entry;
 }
 
-async function seekAndPlay(iframe: HTMLIFrameElement, time: number): Promise<void> {
+async function restorePosition(
+  iframe: HTMLIFrameElement,
+  time: number,
+  previousVideo: HTMLVideoElement | null,
+): Promise<void> {
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     const video = iframe.contentDocument?.querySelector("video");
-    if (video) {
-      try {
-        if (Number.isFinite(time) && time > 0) {
-          video.currentTime = time;
-        }
-        void video.play();
-      } catch {
-        // autoplay / seek may be rejected; ignore
+    if (video && video !== previousVideo && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      if (Number.isFinite(time) && time > 0) {
+        video.currentTime = time;
       }
       return;
     }
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+type PlayerWindow = Window & {
+  fastStream?: unknown;
+  __biliPlayerReady?: boolean;
+};
+
+/** Wait until FastStream has finished setup (and can accept postMessage sources). */
+function waitForPlayerReady(
+  iframe: HTMLIFrameElement,
+  isCancelled: () => boolean,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const win = iframe.contentWindow as PlayerWindow | null;
+    if (!win) {
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("message", onMessage);
+      clearInterval(poll);
+      clearTimeout(timer);
+      resolve(ok);
+    };
+
+    const isReady = (): boolean => {
+      try {
+        return Boolean(win.__biliPlayerReady && win.fastStream);
+      } catch {
+        return false;
+      }
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== win) return;
+      if (event.data?.type === "player-ready") finish(true);
+    };
+
+    const poll = setInterval(() => {
+      if (isCancelled()) {
+        finish(false);
+        return;
+      }
+      if (isReady()) finish(true);
+    }, 50);
+
+    const timer = setTimeout(() => {
+      // Last-chance fallback: fastStream may exist even if the ready flag was missed.
+      try {
+        if (win.fastStream) {
+          finish(true);
+          return;
+        }
+      } catch {
+        // ignore cross-origin / destroyed frame
+      }
+      finish(false);
+    }, PLAYER_READY_TIMEOUT_MS);
+
+    window.addEventListener("message", onMessage);
+    if (isReady()) finish(true);
+  });
 }
 
 export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChannel }: Props) {
@@ -129,6 +199,7 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
   /** Translated tracks to re-inject after a feed (stream-expiry / login). */
   const translatedTracksRef = useRef<FeedSubtitleTrack[] | undefined>(undefined);
   const pendingSeekRef = useRef<number | null>(null);
+  const fedRef = useRef(false);
 
   const lastRefreshAt = useRef(0);
   const lastFeedAt = useRef(0);
@@ -145,20 +216,25 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
   const feed = useCallback(
     (xml: string) => {
       const iframe = iframeRef.current;
-      if (!iframe?.contentWindow) return;
+      if (!iframe?.contentWindow) return false;
+      const previousVideo = iframe.contentDocument?.querySelector("video") ?? null;
       const subs = subtitlesRef.current;
       feedPlayer(iframe, xml, subs ? { subtitles: subs } : undefined);
       lastFeedAt.current = Date.now();
+      fedRef.current = true;
       setFed(true);
 
       const seekTo = pendingSeekRef.current;
+      pendingSeekRef.current = null;
       if (seekTo != null) {
-        pendingSeekRef.current = null;
-        void seekAndPlay(iframe, seekTo);
+        // FastStream owns autoplay. We only restore position after a refresh;
+        // a second play() call here races its source replacement.
+        void restorePosition(iframe, seekTo, previousVideo);
       }
 
       // Re-inject user-translated tracks after re-feed (from cache; no re-translation).
       reinjectTranslated();
+      return true;
     },
     [reinjectTranslated],
   );
@@ -189,6 +265,8 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
     }
   }, [iframeLoaded, video.aid, video.bvid, video.cid]);
 
+  // Reset + load streams / meta / captions independently so translate or subtitle
+  // failures never block playback.
   useEffect(() => {
     let cancelled = false;
     setMetaError(null);
@@ -197,6 +275,8 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
     setOwnerEn(null);
     setMpdXml(null);
     setFed(false);
+    fedRef.current = false;
+    setIframeLoaded(false);
     setTranslations(new Map());
     setShowOriginalDesc(false);
     setTracks(null);
@@ -211,24 +291,49 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
 
     void (async () => {
       try {
-        const [{ mpdXml: xml }, translated, subs] = await Promise.all([
-          bridge.getStreams({ bvid: video.bvid, aid: video.aid }, video.cid),
-          bridge.translate([video.title, video.desc, video.owner.name], {
-            context: "bilibili video title and description",
-          }),
-          bridge.getSubtitles({ bvid: video.bvid, aid: video.aid }, video.cid),
-        ]);
-        if (cancelled) return;
-
-        const originals = await Promise.all(
-          subs.map((track) => ensureOriginalCached(video.cid, track)),
+        const { mpdXml: xml } = await bridge.getStreams(
+          { bvid: video.bvid, aid: video.aid },
+          video.cid,
         );
+        if (!cancelled) setMpdXml(xml);
+      } catch (err) {
+        if (!cancelled) setMetaError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+
+    void (async () => {
+      try {
+        const translated = await bridge.translate([video.title, video.desc, video.owner.name], {
+          context: "bilibili video title and description",
+        });
+        if (cancelled) return;
+        setTitleEn(translated[0] ?? null);
+        setDescEn(translated[1] ?? null);
+        setOwnerEn(translated[2] ?? null);
+      } catch {
+        // Keep Chinese originals; translation is best-effort.
+      }
+    })();
+
+    void (async () => {
+      try {
+        const subs = await bridge.getSubtitles({ bvid: video.bvid, aid: video.aid }, video.cid);
         if (cancelled) return;
 
-        subtitlesRef.current =
-          originals.length > 0 ? originals.map((e) => e.original) : undefined;
+        const originals: CaptionCacheEntry[] = [];
+        for (const track of subs) {
+          try {
+            originals.push(await ensureOriginalCached(video.cid, track));
+          } catch (err) {
+            console.warn("Failed to load subtitle track", track.lan, err);
+          }
+        }
+        if (cancelled) return;
 
-        // Restore prior session translation for this cid's preferred track, if any.
+        const originalTracks =
+          originals.length > 0 ? originals.map((e) => e.original) : undefined;
+        subtitlesRef.current = originalTracks;
+
         if (subs.length > 0) {
           const source = pickTranslateSource(subs);
           const cached = captionCache.get(cacheKey(video.cid, source.url));
@@ -238,20 +343,26 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
           }
         }
 
-        setMpdXml(xml);
-        setTitleEn(translated[0] ?? null);
-        setDescEn(translated[1] ?? null);
-        setOwnerEn(translated[2] ?? null);
         setTracks(subs);
+
+        // Captions often arrive after the first feed — inject without reloading the stream.
+        const iframe = iframeRef.current;
+        if (fedRef.current && iframe?.contentWindow && originalTracks?.length) {
+          addSubtitleTracks(iframe, originalTracks);
+          reinjectTranslated();
+        }
       } catch (err) {
-        if (!cancelled) setMetaError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          console.warn("Failed to load subtitles", err);
+          setTracks([]);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [video]);
+  }, [video, reinjectTranslated]);
 
   useEffect(() => {
     if (sessionEpochRef.current === sessionEpoch) return;
@@ -263,7 +374,25 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
 
   useEffect(() => {
     if (!iframeLoaded || !mpdXml) return;
-    feed(mpdXml);
+    let cancelled = false;
+
+    void (async () => {
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+      const ready = await waitForPlayerReady(iframe, () => cancelled);
+      if (cancelled) return;
+      if (!ready) {
+        setMetaError("Player failed to initialize");
+        return;
+      }
+      if (!feed(mpdXml) && !cancelled) {
+        setMetaError("Player iframe is not ready");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [feed, iframeLoaded, mpdXml]);
 
   useEffect(() => {
@@ -273,12 +402,43 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
     if (!iframe || !doc) return;
 
     const hooked = new WeakSet<HTMLMediaElement>();
+    const waitingTimers = new Map<HTMLMediaElement, ReturnType<typeof setTimeout>>();
+    let freezeTimer: ReturnType<typeof setInterval> | undefined;
+    let lastTime = -1;
+    let frozenSince: number | null = null;
+    let playbackStarted = false;
 
     const onError = () => {
       void refreshStreams("error");
     };
     const onStalled = () => {
+      if (!playbackStarted) return;
       void refreshStreams("stalled");
+    };
+    const clearWaiting = (el: HTMLMediaElement) => {
+      const t = waitingTimers.get(el);
+      if (t) clearTimeout(t);
+      waitingTimers.delete(el);
+    };
+    const onWaiting = (event: Event) => {
+      if (!playbackStarted) return;
+      const el = event.currentTarget as HTMLMediaElement;
+      clearWaiting(el);
+      waitingTimers.set(
+        el,
+        setTimeout(() => {
+          waitingTimers.delete(el);
+          void refreshStreams("waiting");
+        }, WAITING_REFRESH_MS),
+      );
+    };
+    const onPlaying = (event: Event) => {
+      playbackStarted = true;
+      clearWaiting(event.currentTarget as HTMLMediaElement);
+      frozenSince = null;
+    };
+    const onCanPlay = (event: Event) => {
+      clearWaiting(event.currentTarget as HTMLMediaElement);
     };
 
     const hookMedia = (el: HTMLMediaElement) => {
@@ -286,6 +446,9 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
       hooked.add(el);
       el.addEventListener("error", onError);
       el.addEventListener("stalled", onStalled);
+      el.addEventListener("waiting", onWaiting);
+      el.addEventListener("playing", onPlaying);
+      el.addEventListener("canplay", onCanPlay);
     };
 
     const scan = () => {
@@ -297,6 +460,27 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
     scan();
     const observer = new MutationObserver(scan);
     observer.observe(doc.documentElement, { childList: true, subtree: true });
+
+    // Detect "playing" freezes where the element never fires stalled/error.
+    freezeTimer = setInterval(() => {
+      const videoEl = doc.querySelector("video");
+      if (!playbackStarted || !videoEl || videoEl.paused || videoEl.ended) {
+        frozenSince = null;
+        lastTime = videoEl?.currentTime ?? -1;
+        return;
+      }
+      const t = videoEl.currentTime;
+      if (Math.abs(t - lastTime) < 0.05) {
+        if (frozenSince == null) frozenSince = Date.now();
+        else if (Date.now() - frozenSince >= FREEZE_REFRESH_MS) {
+          frozenSince = null;
+          void refreshStreams("frozen");
+        }
+      } else {
+        frozenSince = null;
+      }
+      lastTime = t;
+    }, 1500);
 
     const onResetFailed = (event: Event) => {
       const target = event.target;
@@ -310,6 +494,9 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
     return () => {
       observer.disconnect();
       doc.removeEventListener("click", onResetFailed, true);
+      if (freezeTimer) clearInterval(freezeTimer);
+      for (const t of waitingTimers.values()) clearTimeout(t);
+      waitingTimers.clear();
     };
   }, [fed, iframeLoaded, refreshStreams]);
 
@@ -411,6 +598,7 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChanne
         {metaError && <div className="error-banner">{metaError}</div>}
         <div className="player-wrap">
           <iframe
+            key={video.bvid}
             ref={iframeRef}
             id="player"
             title="Player"

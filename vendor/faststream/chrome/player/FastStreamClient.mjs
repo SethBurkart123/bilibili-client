@@ -856,10 +856,10 @@ export class FastStreamClient extends EventEmitter {
       this.interfaceController.updateToolVisibility();
 
       this.state.autoPlayTriggered = false;
-      if (autoPlay) {
+      if (autoPlay && this.player.readyState >= 2) {
         this.play().then(() => {
           this.state.autoPlayTriggered = true;
-        });
+        }).catch(() => {});
       }
 
       this.loadProgressData().then(async () => {
@@ -885,10 +885,10 @@ export class FastStreamClient extends EventEmitter {
 
         this.disableProgressSave = false;
 
-        if (autoPlay && !this.state.autoPlayTriggered) {
+        if (autoPlay && !this.state.autoPlayTriggered && this.player.readyState >= 2) {
           this.play().then(() => {
             this.state.autoPlayTriggered = true;
-          });
+          }).catch(() => {});
         }
       });
     } catch (e) {
@@ -1353,7 +1353,9 @@ export class FastStreamClient extends EventEmitter {
 
       if (!this.state.autoPlayTriggered && this.options.autoPlay && this.state.playing === false) {
         this.state.autoPlayTriggered = true;
-        this.play();
+        this.play().catch(() => {
+          this.state.autoPlayTriggered = false;
+        });
       }
     });
 
@@ -2022,4 +2024,3 @@ export class FastStreamClient extends EventEmitter {
     this.player.getVideo().style.objectFit = 'cover';
   }
 }
-

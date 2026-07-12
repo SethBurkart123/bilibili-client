@@ -127,7 +127,12 @@ async function recieveSources(request, sendResponse) {
     }
   }
 
-  if (window.fastStream.source || !request.autoSetSource) {
+  // Extension may accumulate sources without replacing the active one.
+  // Web embed (bilibili-client) always replaces when autoSetSource is true so
+  // stream-refresh / re-feed actually switches playback.
+  if (!request.autoSetSource) {
+    autoSetSource = null;
+  } else if (window.fastStream.source && EnvUtils.isExtension()) {
     autoSetSource = null;
   }
 
@@ -143,9 +148,11 @@ async function recieveSources(request, sendResponse) {
     window.fastStream.setAutoPlay(true); // Enable autoplay for yt only. Not embeds.
   }
 
-  sources.forEach((s) => {
-    window.fastStream.addSource(new VideoSource(s.url, s.headers, s.mode), s === autoSetSource);
-  });
+  // addSource is asynchronous when it selects the active source. Wait for the
+  // replacement player to finish loading before treating this feed as received.
+  for (const s of sources) {
+    await window.fastStream.addSource(new VideoSource(s.url, s.headers, s.mode), s === autoSetSource);
+  }
 
   if (subs) {
     subs = await loadSubtitles(subs);
@@ -263,7 +270,66 @@ async function loadOptions() {
   }
 }
 
+function handleWebPlayerMessage(data) {
+  if (data?.type === 'sources') {
+    recieveSources(data, () => {});
+  } else if (data?.type === 'subtitles') {
+    // bilibili-client patch: runtime subtitle injection
+    // Load every track first, then activate — mid-loop activateTrack must not
+    // skip remaining tracks if it throws or looks up a not-yet-registered track.
+    if (!window.fastStream) return;
+    const subs = data.subtitles || [];
+    const activateLabel = data.activateLabel;
+    let activateReturned = null;
+    for (const sub of subs) {
+      if (!sub || typeof sub.data !== 'string') continue;
+      const track = new SubtitleTrack(sub.label, sub.language);
+      try {
+        track.loadText(sub.data);
+        // Match recieveSources: empty-cue tracks are dropped by FastStream.
+        if (track.cues.length > 0) {
+          const returned = window.fastStream.loadSubtitleTrack(track, false);
+          if (activateLabel && sub.label === activateLabel) {
+            activateReturned = returned;
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    if (activateReturned) {
+      try {
+        window.fastStream.interfaceController.subtitlesManager.activateTrack(activateReturned);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+}
+
 async function setup() {
+  // Queue host postMessages that arrive before FastStream finishes booting.
+  // iframe onLoad fires before this async setup completes, so bilibili-client
+  // can feed sources too early without a queue.
+  const pendingWebMessages = [];
+  let webMessagesReady = false;
+  if (!EnvUtils.isExtension()) {
+    window.addEventListener('message', (e) => {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type === 'options') {
+        if (window.fastStream) loadOptions();
+        return;
+      }
+      if (e.data?.type === 'sources' || e.data?.type === 'subtitles') {
+        if (!webMessagesReady || !window.fastStream) {
+          pendingWebMessages.push(e.data);
+          return;
+        }
+        handleWebPlayerMessage(e.data);
+      }
+    });
+  }
+
   if (!window.fastStream) {
     window.fastStream = new FastStreamClient();
     await window.fastStream.setup();
@@ -294,10 +360,10 @@ async function setup() {
       });
     });
   } else {
-    // if in iframe, require interaction
-    if (window.self !== window.top) {
-      window.fastStream.setNeedsUserInteraction(true);
-    }
+    // bilibili-client: dedicated desktop shell embeds this iframe.
+    // Requiring a click inside the player blocked predownloadFragments() forever
+    // (parent UI clicks do not count), so video appeared to hang on a black frame.
+    window.fastStream.setNeedsUserInteraction(false);
   }
 
   const version = window.fastStream.version;
@@ -339,47 +405,18 @@ async function setup() {
   }
 
   if (!EnvUtils.isExtension()) {
-    // if not extension context then use iframe messager
-    window.addEventListener('message', (e) => {
-      if (e.origin !== window.location.origin) return;
-
-      if (e.data?.type === 'options') {
-        loadOptions();
-      } else if (e.data?.type === 'sources') {
-        recieveSources(e.data, () => {});
-      } else if (e.data?.type === 'subtitles') {
-        // bilibili-client patch: runtime subtitle injection
-        // Load every track first, then activate — mid-loop activateTrack must not
-        // skip remaining tracks if it throws or looks up a not-yet-registered track.
-        if (!window.fastStream) return;
-        const subs = e.data.subtitles || [];
-        const activateLabel = e.data.activateLabel;
-        let activateReturned = null;
-        for (const sub of subs) {
-          if (!sub || typeof sub.data !== 'string') continue;
-          const track = new SubtitleTrack(sub.label, sub.language);
-          try {
-            track.loadText(sub.data);
-            // Match recieveSources: empty-cue tracks are dropped by FastStream.
-            if (track.cues.length > 0) {
-              const returned = window.fastStream.loadSubtitleTrack(track, false);
-              if (activateLabel && sub.label === activateLabel) {
-                activateReturned = returned;
-              }
-            }
-          } catch (err) {
-            console.error(err);
-          }
-        }
-        if (activateReturned) {
-          try {
-            window.fastStream.interfaceController.subtitlesManager.activateTrack(activateReturned);
-          } catch (err) {
-            console.error(err);
-          }
-        }
+    webMessagesReady = true;
+    for (const data of pendingWebMessages) {
+      handleWebPlayerMessage(data);
+    }
+    try {
+      window.__biliPlayerReady = true;
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'player-ready' }, window.location.origin);
       }
-    });
+    } catch (err) {
+      console.error(err);
+    }
   }
 }
 

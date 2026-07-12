@@ -12,9 +12,14 @@ const DEFAULT_ALLOW_HOSTS = [
 
 const MIRRORED_HEADERS = ["content-type", "content-length", "content-range", "accept-ranges"] as const;
 
+/** Give up on a silent/hung CDN before the player freezes forever. */
+const UPSTREAM_TIMEOUT_MS = 25_000;
+
 export interface StreamProxyOptions {
   allowHosts?: RegExp[];
   headers?: Record<string, string>;
+  /** Per-upstream fetch timeout in ms (headers + full body). */
+  upstreamTimeoutMs?: number;
 }
 
 /**
@@ -25,12 +30,14 @@ export interface StreamProxyOptions {
 export class StreamProxy {
   private readonly allowHosts: RegExp[];
   private readonly headers: Record<string, string>;
+  private readonly upstreamTimeoutMs: number;
   private server: Server | undefined;
   private port: number | undefined;
   private starting: Promise<number> | undefined;
 
   constructor(opts: StreamProxyOptions = {}) {
     this.allowHosts = opts.allowHosts ?? DEFAULT_ALLOW_HOSTS;
+    this.upstreamTimeoutMs = opts.upstreamTimeoutMs ?? UPSTREAM_TIMEOUT_MS;
     this.headers = {
       ...withoutCookies(opts.headers ?? {}),
       Referer: "https://www.bilibili.com/",
@@ -134,13 +141,22 @@ export class StreamProxy {
     let body: Readable | undefined;
     let upstreamBody: ReadableStream<Uint8Array> | undefined;
     const abortUpstream = () => {
+      if (controller.signal.aborted) return;
       controller.abort();
       body?.destroy(new Error("Media proxy client disconnected"));
       void upstreamBody?.cancel().catch(() => undefined);
     };
-    req.once("close", abortUpstream);
-    req.socket.once("close", abortUpstream);
-    res.once("close", abortUpstream);
+    // Tear down upstream only if the client drops before we finish writing.
+    // Do not listen to IncomingMessage "close" — it fires when the request is
+    // fully received, which for GET is immediate and would kill live streams.
+    const onClientGone = () => {
+      if (!res.writableFinished) abortUpstream();
+    };
+    res.once("close", onClientGone);
+    req.socket.once("close", onClientGone);
+    res.once("finish", () => {
+      req.socket.off("close", onClientGone);
+    });
 
     try {
       const response = await this.fetchFirstAvailable(upstream, req, controller.signal);
@@ -170,8 +186,11 @@ export class StreamProxy {
       body.pipe(res);
     } catch (error) {
       if (!res.destroyed) {
-        console.warn("Media proxy request failed:", error);
-        res.writeHead(502).end();
+        if (!controller.signal.aborted) {
+          console.warn("Media proxy request failed:", error);
+        }
+        if (!res.headersSent) res.writeHead(502).end();
+        else res.destroy(error instanceof Error ? error : undefined);
       }
     }
   }
@@ -219,20 +238,73 @@ export class StreamProxy {
     if (typeof req.headers.range === "string") headers.Range = req.headers.range;
 
     for (const upstream of upstreams) {
+      // Timeout applies to time-to-headers only. Once headers arrive we keep
+      // streaming under the client-disconnect signal so large ranges can finish.
+      const local = new AbortController();
+      const onClientAbort = () => local.abort();
+      signal.addEventListener("abort", onClientAbort);
+      const timer = setTimeout(() => local.abort(), this.upstreamTimeoutMs);
       try {
         const response = await fetch(upstream, {
           headers,
           credentials: "omit",
-          signal,
+          signal: local.signal,
         });
-        if (response.status < 400) return response;
+        clearTimeout(timer);
+        if (response.status < 400) {
+          if (response.status === 206 && response.body) {
+            // A CDN can close a range response early after sending valid headers.
+            // Validate the finite range before committing Content-Length to
+            // Chromium so a truncated primary can fall back to a backup URL.
+            const bodyTimer = setTimeout(() => local.abort(), this.upstreamTimeoutMs);
+            try {
+              const bytes = new Uint8Array(await response.arrayBuffer());
+              const expected = expectedRangeLength(response.headers);
+              if (expected != null && bytes.byteLength !== expected) {
+                throw new Error(`Truncated media range: expected ${expected}, received ${bytes.byteLength}`);
+              }
+              clearTimeout(bodyTimer);
+              signal.removeEventListener("abort", onClientAbort);
+              return new Response(bytes, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+              });
+            } catch (error) {
+              clearTimeout(bodyTimer);
+              signal.removeEventListener("abort", onClientAbort);
+              if (signal.aborted) throw error;
+              continue;
+            }
+          }
+          // Keep client-abort linked for the body stream lifetime.
+          return response;
+        }
+        signal.removeEventListener("abort", onClientAbort);
         await response.body?.cancel();
       } catch (error) {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onClientAbort);
         if (signal.aborted) throw error;
+        // Timed out or upstream error — try next backup URL.
       }
     }
     return undefined;
   }
+}
+
+function expectedRangeLength(headers: Headers): number | undefined {
+  const contentRange = headers.get("content-range")?.match(/^bytes\s+(\d+)-(\d+)\/(?:\d+|\*)$/i);
+  if (contentRange) {
+    const start = Number(contentRange[1]);
+    const end = Number(contentRange[2]);
+    if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && end >= start) {
+      return end - start + 1;
+    }
+  }
+
+  const contentLength = Number(headers.get("content-length"));
+  return Number.isSafeInteger(contentLength) && contentLength >= 0 ? contentLength : undefined;
 }
 
 function withoutCookies(headers: Record<string, string>): Record<string, string> {

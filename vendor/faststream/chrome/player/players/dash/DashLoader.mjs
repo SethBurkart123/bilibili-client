@@ -36,8 +36,8 @@ export function DASHLoaderFactory(player) {
         const level = DashTrackUtils.getLevelFromRepresentation(representation);
         const frag = player.client.getFragment(level, segmentIndex);
         if (!frag) {
-          console.warn('Fragment not found', requestObj, level, player.client.getFragments(level));
-          // throw new Error("Fragment not found");
+          // dash.js can request its initialization segment before FastStream has
+          // populated the fragment cache. Fall back to the normal DASH request.
           request(httpRequest, true, requestObj.startTime || 0, requestObj.type === 'InitializationSegment' || isNaN(segmentIndex));
           return;
         }
@@ -92,15 +92,19 @@ export function DASHLoaderFactory(player) {
       let rangeStart = undefined;
       let rangeEnd = undefined;
 
-      if (request.range) {
-        const [start, end] = StringUtils.parseHTTPRange(request.range);
+      const headerRange = httpRequest.headers.Range || httpRequest.headers.range;
+      const range = request.range || (isInit ? request.representation?.range : null) ||
+        (typeof headerRange === 'string' ? headerRange.replace(/^bytes=/i, '') : null);
+      if (range) {
+        const [start, end] = StringUtils.parseHTTPRange(range);
         if (start === undefined) {
-          console.warn('Failed to parse range', request.range);
+          console.warn('Failed to parse range', range);
         } else {
           rangeStart = start;
           rangeEnd = end + 1;
         }
         delete httpRequest.headers.Range;
+        delete httpRequest.headers.range;
       }
       const context = {
         url: decodeURI(httpRequest.url),

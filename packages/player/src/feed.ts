@@ -22,6 +22,11 @@ export interface FeedPlayerOptions {
    * When omitted, the payload still sends `subtitles: []`.
    */
   subtitles?: FeedSubtitleTrack[];
+  /**
+   * When true (default), FastStream enables autoplay for the new source.
+   * Desktop embeds need this — without it the player sits on a black frame.
+   */
+  forceAutoplay?: boolean;
 }
 
 /**
@@ -64,6 +69,8 @@ export function feedPlayer(
     // Without autoSetSource, recieveSources nulls the chosen source and never
     // calls addSource(..., true) as current.
     autoSetSource: true,
+    // Without forceAutoplay, setSource never calls play() — black frame hang.
+    forceAutoplay: opts?.forceAutoplay !== false,
     subtitles,
   };
 

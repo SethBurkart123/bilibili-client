@@ -35,6 +35,8 @@ export default function App() {
   }>({ loggedIn: false });
   const [sessionEpoch, setSessionEpoch] = useState(0);
   const [settingsEpoch, setSettingsEpoch] = useState(0);
+  /** Bumps on every openVideo call so slower earlier resolves cannot overwrite newer ones. */
+  const openVideoSeq = useRef(0);
 
   useEffect(() => {
     setRecent(loadRecent());
@@ -50,10 +52,12 @@ export default function App() {
   const openVideo = useCallback(async (raw: string, opts?: { replace?: boolean }) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
+    const seq = ++openVideoSeq.current;
     setBusy(true);
     setError(null);
     try {
       const video = await bridge.resolveVideo(trimmed);
+      if (seq !== openVideoSeq.current) return;
       // Always replace with a single canonical URL — never keep a pasted/concatenated raw value.
       const canonical = `https://www.bilibili.com/video/${video.bvid}`;
       setRecent(pushRecent({ url: canonical, title: video.title, visitedAt: Date.now() }));
@@ -67,9 +71,10 @@ export default function App() {
         setView(next);
       }
     } catch (err) {
+      if (seq !== openVideoSeq.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      if (seq === openVideoSeq.current) setBusy(false);
     }
   }, []);
 

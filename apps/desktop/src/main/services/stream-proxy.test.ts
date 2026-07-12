@@ -120,6 +120,58 @@ describe("StreamProxy", () => {
     expect(requested).toEqual(["/primary", "/backup"]);
   });
 
+  it("uses a backup when a range body is shorter than its declared length", async () => {
+    const requested: string[] = [];
+    await startUpstream((req, res) => {
+      requested.push(req.url ?? "");
+      if (req.url === "/primary") {
+        res.writeHead(206, {
+          "Content-Range": "bytes 0-3/10",
+          "Content-Length": "4",
+        });
+        res.end("x");
+        return;
+      }
+      res.writeHead(206, {
+        "Content-Range": "bytes 0-3/10",
+        "Content-Length": "4",
+      }).end("test");
+    });
+    proxy = new StreamProxy({ allowHosts: [/^media\.test$/], upstreamTimeoutMs: 80 });
+    await proxy.start();
+
+    const response = await fetch(
+      mediaUrl("https://media.test/primary", ["https://media.test/backup"]),
+      { headers: { Range: "bytes=0-3" } },
+    );
+
+    expect(response.status).toBe(206);
+    expect(await response.text()).toBe("test");
+    expect(requested).toEqual(["/primary", "/backup"]);
+  });
+
+  it("times out a hung upstream and tries the backup", async () => {
+    const requested: string[] = [];
+    await startUpstream((req, res) => {
+      requested.push(req.url ?? "");
+      if (req.url === "/hang") {
+        // Never respond — force TTFB timeout.
+        return;
+      }
+      res.writeHead(206, { "Content-Range": "bytes 0-1/2", "Content-Length": "2" }).end("ok");
+    });
+    proxy = new StreamProxy({ allowHosts: [/^media\.test$/], upstreamTimeoutMs: 80 });
+    await proxy.start();
+
+    const response = await fetch(
+      mediaUrl("https://media.test/hang", ["https://media.test/backup"]),
+    );
+
+    expect(response.status).toBe(206);
+    expect(await response.text()).toBe("ok");
+    expect(requested).toEqual(["/hang", "/backup"]);
+  });
+
   it("aborts the upstream fetch when the client disconnects", async () => {
     await startUpstream((_req, res) => {
       res.writeHead(200, { "Content-Type": "video/mp4" });

@@ -30,7 +30,9 @@ function representationXml(track: DashTrack): string {
   attrs.push(`mimeType="${escapeXml(track.mimeType)}"`);
 
   const indexRange = escapeXml(track.segmentBase.indexRange);
-  const initialization = escapeXml(track.segmentBase.initialization);
+  const initialization = escapeXml(
+    track.segmentBase.initialization || initializationBefore(track.segmentBase.indexRange),
+  );
   const baseUrl = escapeXml(track.baseUrl);
 
   return [
@@ -43,8 +45,26 @@ function representationXml(track: DashTrack): string {
   ].join("");
 }
 
+function initializationBefore(indexRange: string): string {
+  const indexStart = Number(indexRange.split("-", 1)[0]);
+  if (!Number.isSafeInteger(indexStart) || indexStart <= 0) {
+    throw new Error(`Cannot derive initialization range from indexRange: ${indexRange}`);
+  }
+  return `0-${indexStart - 1}`;
+}
+
 function adaptationSetXml(tracks: DashTrack[]): string {
-  return `<AdaptationSet>${tracks.map(representationXml).join("")}</AdaptationSet>`;
+  const byId = new Map<number, DashTrack>();
+  for (const track of tracks) {
+    const existing = byId.get(track.id);
+    // Bilibili reuses quality ids across codecs, while FastStream keys its
+    // fragment store by that quality id. Keep one representation per quality,
+    // preferring AVC for Chromium compatibility and stable fragment lookup.
+    if (!existing || (track.codecid === 7 && existing.codecid !== 7)) {
+      byId.set(track.id, track);
+    }
+  }
+  return `<AdaptationSet>${Array.from(byId.values()).map(representationXml).join("")}</AdaptationSet>`;
 }
 
 /**
