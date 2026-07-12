@@ -55,3 +55,10 @@ review at integration only if warranted.
   resolveVideo OK, UI rendered w/ translated title, translate OK, FastStream playing
   (readyState 4, t advancing, 801s buffered => Referer injection proven in-app).
   Committed c4b6045. Worktrees + fleet branches removed. FLEET RUN COMPLETE.
+- ROUND 2 COMPLETE: subtitle-player + login-api lanes merged (35->37 tests), bugfix lane
+  (gtx chunking, translate retry on toggle, canonical URL) committed 0ea6573, app
+  login+captions lane committed. Headed e2e round 2: comments VISIBLY translated in DOM,
+  URL canonical, CC menu correct no-captions state (anonymous), QR modal renders real QR
+  ("Scan with the bilibili app"), login indicator opens settings, playback alive (readyState
+  4, t advancing). NOT verifiable headless: actual phone-scan login + logged-in ai-zh
+  captions + 1080p unlock — needs the user.
