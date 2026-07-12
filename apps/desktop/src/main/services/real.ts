@@ -163,21 +163,20 @@ export class RealBiliService implements BiliBridge {
     return this.client.getSubtitleLines(url);
   }
 
-  // Parallel channel/search lane owns the real API wiring.
-  async getChannelInfo(_mid: number): Promise<ChannelInfo> {
-    throw new Error("not wired yet — channel/search lane");
+  async getChannelInfo(mid: number): Promise<ChannelInfo> {
+    return this.client.getChannelInfo(mid);
   }
 
-  async getChannelVideos(_mid: number, _page: number): Promise<ChannelVideosPage> {
-    throw new Error("not wired yet — channel/search lane");
+  async getChannelVideos(mid: number, page: number): Promise<ChannelVideosPage> {
+    return this.client.getChannelVideos(mid, page);
   }
 
-  async searchVideos(_keyword: string, _page: number): Promise<SearchVideosPage> {
-    throw new Error("not wired yet — channel/search lane");
+  async searchVideos(keyword: string, page: number): Promise<SearchVideosPage> {
+    return this.client.searchVideos(keyword, page);
   }
 
-  async searchUsers(_keyword: string, _page: number): Promise<SearchUsersPage> {
-    throw new Error("not wired yet — channel/search lane");
+  async searchUsers(keyword: string, page: number): Promise<SearchUsersPage> {
+    return this.client.searchUsers(keyword, page);
   }
 
   async loginQrStart(): Promise<LoginQr> {

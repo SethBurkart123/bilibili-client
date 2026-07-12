@@ -2,16 +2,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoInfo } from "@bili/types";
 import { bridge } from "./lib/bridge";
 import { loadRecent, pushRecent, type RecentEntry } from "./lib/format";
+import { ChannelPage } from "./components/ChannelPage";
 import { Landing } from "./components/Landing";
+import { SearchPage } from "./components/SearchPage";
 import { SettingsModal } from "./components/SettingsModal";
 import { VideoPage } from "./components/VideoPage";
 
 type View =
   | { kind: "landing" }
-  | { kind: "video"; video: VideoInfo; sourceUrl: string };
+  | { kind: "video"; video: VideoInfo; sourceUrl: string }
+  | { kind: "channel"; mid: number }
+  | { kind: "search"; query: string };
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: "landing" });
+  const [history, setHistory] = useState<View[]>([]);
+  const viewRef = useRef(view);
+  const historyRef = useRef(history);
+  viewRef.current = view;
+  historyRef.current = history;
+
   const [url, setUrl] = useState("");
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -31,7 +41,13 @@ export default function App() {
     void bridge.getLoginState().then(setLoginState);
   }, []);
 
-  const openVideo = useCallback(async (raw: string) => {
+  const navigate = useCallback((next: View) => {
+    setHistory((prev) => [...prev, viewRef.current]);
+    setView(next);
+    setError(null);
+  }, []);
+
+  const openVideo = useCallback(async (raw: string, opts?: { replace?: boolean }) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
     setBusy(true);
@@ -42,7 +58,14 @@ export default function App() {
       const canonical = `https://www.bilibili.com/video/${video.bvid}`;
       setRecent(pushRecent({ url: canonical, title: video.title, visitedAt: Date.now() }));
       setUrl(canonical);
-      setView({ kind: "video", video, sourceUrl: canonical });
+      const next: View = { kind: "video", video, sourceUrl: canonical };
+      const current = viewRef.current;
+      if (opts?.replace || current.kind === "video") {
+        setView(next);
+      } else {
+        setHistory((prev) => [...prev, current]);
+        setView(next);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -51,12 +74,33 @@ export default function App() {
   }, []);
 
   function goBack(): void {
-    setView({ kind: "landing" });
+    const stack = historyRef.current;
+    if (stack.length === 0) {
+      setView({ kind: "landing" });
+      setError(null);
+      return;
+    }
+    setHistory(stack.slice(0, -1));
+    setView(stack[stack.length - 1]!);
     setError(null);
   }
 
   function onHeaderSubmit(): void {
-    void openVideo(url);
+    void openVideo(url, { replace: true });
+  }
+
+  function openChannel(mid: number): void {
+    const current = viewRef.current;
+    if (current.kind === "channel" && current.mid === mid) return;
+    navigate({ kind: "channel", mid });
+  }
+
+  function openSearch(query = ""): void {
+    if (viewRef.current.kind === "search") {
+      setView({ kind: "search", query });
+      return;
+    }
+    navigate({ kind: "search", query });
   }
 
   function onLoginStateChange(state: typeof loginState): void {
@@ -67,10 +111,13 @@ export default function App() {
     }
   }
 
+  const showBack = view.kind !== "landing";
+  const showVideoUrlBar = view.kind === "video";
+
   return (
     <div className="app-shell">
       <header className="header">
-        {view.kind === "video" ? (
+        {showBack ? (
           <button
             type="button"
             className="icon-btn"
@@ -85,7 +132,7 @@ export default function App() {
             Bili <span>Translate</span>
           </div>
         )}
-        {view.kind === "video" && (
+        {showVideoUrlBar && (
           <>
             <input
               className="url-input"
@@ -109,7 +156,25 @@ export default function App() {
             </button>
           </>
         )}
-        <div style={{ flex: view.kind === "landing" ? 1 : undefined }} />
+        <div
+          style={{
+            flex:
+              view.kind === "landing" || view.kind === "channel" || view.kind === "search"
+                ? 1
+                : undefined,
+          }}
+        />
+        {view.kind !== "search" && (
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Search"
+            title="Search"
+            onClick={() => openSearch("")}
+          >
+            ⌕
+          </button>
+        )}
         <button
           type="button"
           className="login-indicator"
@@ -143,7 +208,7 @@ export default function App() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      {view.kind === "landing" ? (
+      {view.kind === "landing" && (
         <Landing
           url={url}
           onUrlChange={setUrl}
@@ -151,11 +216,24 @@ export default function App() {
           recent={recent}
           busy={busy}
         />
-      ) : (
+      )}
+      {view.kind === "video" && (
         <VideoPage
           video={view.video}
           sessionEpoch={sessionEpoch}
           settingsEpoch={settingsEpoch}
+          onOpenChannel={openChannel}
+        />
+      )}
+      {view.kind === "channel" && (
+        <ChannelPage mid={view.mid} onOpenVideo={(bvid) => void openVideo(bvid)} />
+      )}
+      {view.kind === "search" && (
+        <SearchPage
+          initialQuery={view.query}
+          onOpenVideo={(bvid) => void openVideo(bvid)}
+          onOpenChannel={openChannel}
+          onQueryChange={(query) => setView({ kind: "search", query })}
         />
       )}
 

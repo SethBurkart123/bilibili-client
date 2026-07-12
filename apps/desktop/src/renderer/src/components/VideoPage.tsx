@@ -10,6 +10,7 @@ interface Props {
   video: VideoInfo;
   sessionEpoch: number;
   settingsEpoch?: number;
+  onOpenChannel?: (mid: number) => void;
 }
 
 const REFRESH_COOLDOWN_MS = 15_000;
@@ -105,7 +106,7 @@ async function seekAndPlay(iframe: HTMLIFrameElement, time: number): Promise<voi
   }
 }
 
-export function VideoPage({ video, sessionEpoch, settingsEpoch = 0 }: Props) {
+export function VideoPage({ video, sessionEpoch, settingsEpoch = 0, onOpenChannel }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [mpdXml, setMpdXml] = useState<string | null>(null);
@@ -440,12 +441,18 @@ export function VideoPage({ video, sessionEpoch, settingsEpoch = 0 }: Props) {
         <div className="video-meta">
           <h1>{titleEn ?? video.title}</h1>
           {titleEn && <p className="original-title">{video.title}</p>}
-          <div className="uploader">
+          <button
+            type="button"
+            className="uploader"
+            onClick={() => onOpenChannel?.(video.owner.mid)}
+            disabled={!onOpenChannel}
+            title="Open channel"
+          >
             {video.owner.name}
             {ownerEn && ownerEn !== video.owner.name && (
               <span className="uploader-translated"> ({ownerEn})</span>
             )}
-          </div>
+          </button>
           <div className="stats-row">
             {`${formatCount(parseCjkCount(video.stat.view))} views · ${formatCount(parseCjkCount(video.stat.like))} likes · ${formatCount(parseCjkCount(video.stat.reply))} comments`}
           </div>
