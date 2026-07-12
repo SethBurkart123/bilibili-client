@@ -428,4 +428,16 @@ async function runAll() {
   removeBuildDirs();
 }
 
-runAll();
+// --web: produce only built/web (standalone player). Full runAll also packages
+// Chrome/Firefox zips via web-ext and rewrites chrome/manifest.json — unnecessary
+// for embedding and mutates the vendored tree.
+if (process.argv.includes('--web')) {
+  buildWeb().then(() => {
+    console.log('Web build complete ->', webBuildDir);
+  }).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+} else {
+  runAll();
+}
