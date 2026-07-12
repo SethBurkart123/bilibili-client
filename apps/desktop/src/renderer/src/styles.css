@@ -561,6 +561,248 @@ a:focus-visible {
   border-color: var(--muted);
 }
 
+.login-indicator {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.login-indicator:hover {
+  border-color: var(--accent);
+}
+
+.login-indicator-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.login-indicator-fallback {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.settings-section {
+  margin-bottom: 1.15rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.account-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.account-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.account-avatar-fallback {
+  flex-shrink: 0;
+}
+
+.account-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-uname {
+  font-weight: 600;
+}
+
+.account-mid {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.account-hint {
+  margin: 0;
+  flex: 1;
+  min-width: 10rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.qr-modal-backdrop {
+  z-index: 60;
+}
+
+.qr-modal {
+  text-align: center;
+}
+
+.qr-code-btn {
+  display: inline-grid;
+  place-items: center;
+  padding: 0.5rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  cursor: default;
+}
+
+.qr-code-btn:not(:disabled) {
+  cursor: pointer;
+}
+
+.qr-code-img {
+  width: 220px;
+  height: 220px;
+  display: block;
+}
+
+.qr-code-placeholder {
+  width: 220px;
+  height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 1.5rem;
+}
+
+.qr-status {
+  margin-top: 0.75rem;
+}
+
+.player-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+  min-height: 2rem;
+}
+
+.captions-control {
+  position: relative;
+}
+
+.cc-btn {
+  min-width: 2.5rem;
+  height: 32px;
+  padding: 0 0.65rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.cc-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cc-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.captions-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 15;
+  min-width: 220px;
+  max-width: min(320px, 80vw);
+  padding: 0.45rem;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.captions-empty {
+  padding: 0.55rem 0.65rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.captions-track {
+  padding: 0.4rem 0.45rem 0.55rem;
+}
+
+.captions-track + .captions-track {
+  border-top: 1px solid var(--border);
+}
+
+.captions-track-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.ai-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg));
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.captions-track-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.captions-track-actions button {
+  height: 28px;
+  padding: 0 0.55rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+
+.captions-track-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.captions-error {
+  font-size: 0.8rem;
+  color: #ffb3bf;
+}
+
 @media (max-width: 960px) {
   .video-page {
     grid-template-columns: 1fr;

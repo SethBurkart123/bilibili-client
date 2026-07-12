@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoInfo } from "@bili/types";
 import { bridge } from "./lib/bridge";
 import { loadRecent, pushRecent, type RecentEntry } from "./lib/format";
@@ -17,9 +17,17 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [loginState, setLoginState] = useState<{
+    loggedIn: boolean;
+    uname?: string;
+    mid?: number;
+    face?: string;
+  }>({ loggedIn: false });
+  const [sessionEpoch, setSessionEpoch] = useState(0);
 
   useEffect(() => {
     setRecent(loadRecent());
+    void bridge.getLoginState().then(setLoginState);
   }, []);
 
   const openVideo = useCallback(async (raw: string) => {
@@ -48,6 +56,14 @@ export default function App() {
 
   function onHeaderSubmit(): void {
     void openVideo(url);
+  }
+
+  function onLoginStateChange(state: typeof loginState): void {
+    const wasLoggedIn = loginState.loggedIn;
+    setLoginState(state);
+    if (state.loggedIn !== wasLoggedIn) {
+      setSessionEpoch((n) => n + 1);
+    }
   }
 
   return (
@@ -95,6 +111,26 @@ export default function App() {
         <div style={{ flex: view.kind === "landing" ? 1 : undefined }} />
         <button
           type="button"
+          className="login-indicator"
+          aria-label={loginState.loggedIn ? `Account: ${loginState.uname ?? "Logged in"}` : "Log in"}
+          title={loginState.loggedIn ? loginState.uname ?? "Account" : "Log in"}
+          onClick={() => setSettingsOpen(true)}
+        >
+          {loginState.loggedIn && loginState.face ? (
+            <img
+              className="login-indicator-avatar"
+              src={loginState.face}
+              alt=""
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="login-indicator-fallback" aria-hidden>
+              {loginState.loggedIn ? (loginState.uname?.[0] ?? "?") : "In"}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           className="icon-btn"
           aria-label="Settings"
           title="Settings"
@@ -115,10 +151,15 @@ export default function App() {
           busy={busy}
         />
       ) : (
-        <VideoPage video={view.video} />
+        <VideoPage video={view.video} sessionEpoch={sessionEpoch} />
       )}
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        loginState={loginState}
+        onLoginStateChange={onLoginStateChange}
+      />
     </div>
   );
 }

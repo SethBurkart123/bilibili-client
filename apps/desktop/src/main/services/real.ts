@@ -22,6 +22,11 @@ import type {
   VideoInfo,
 } from "@bili/types";
 import type { BiliBridge } from "./bridge";
+import {
+  clearSessionCookies,
+  loadSessionCookies,
+  saveSessionCookies,
+} from "./session-store";
 import { loadSettings, saveSettings } from "./settings-store";
 
 function translationsCachePath(): string {
@@ -63,6 +68,13 @@ export class RealBiliService implements BiliBridge {
   private readonly cache = new JsonFileCache(translationsCachePath());
   private settings: TranslatorSettings = loadSettings();
   private translator: Translator = buildTranslator(this.settings, this.cache);
+
+  constructor() {
+    const cookies = loadSessionCookies();
+    if (cookies) {
+      this.client.setCookies(cookies);
+    }
+  }
 
   private rebuildTranslator(): void {
     this.translator = buildTranslator(this.settings, this.cache);
@@ -125,26 +137,32 @@ export class RealBiliService implements BiliBridge {
     this.rebuildTranslator();
   }
 
-  // Neutral stubs — login/subtitles lanes fill these in.
-  async getSubtitles(_id: VideoId, _cid: number): Promise<SubtitleTrackInfo[]> {
-    return [];
+  async getSubtitles(id: VideoId, cid: number): Promise<SubtitleTrackInfo[]> {
+    return this.client.getSubtitles(id, cid);
   }
 
-  async getSubtitleLines(_url: string): Promise<SubtitleLine[]> {
-    return [];
+  async getSubtitleLines(url: string): Promise<SubtitleLine[]> {
+    return this.client.getSubtitleLines(url);
   }
 
   async loginQrStart(): Promise<LoginQr> {
-    return { url: "https://example.invalid/qr", qrcodeKey: "mock" };
+    return this.client.loginQrStart();
   }
 
-  async loginQrPoll(_qrcodeKey: string): Promise<LoginPollResult> {
-    return { status: "waiting" };
+  async loginQrPoll(qrcodeKey: string): Promise<LoginPollResult> {
+    const result = await this.client.loginQrPoll(qrcodeKey);
+    if (result.status === "success") {
+      saveSessionCookies(this.client.getCookies());
+    }
+    return result;
   }
 
   async getLoginState(): Promise<LoginState> {
-    return { loggedIn: false };
+    return this.client.getLoginState();
   }
 
-  async logout(): Promise<void> {}
+  async logout(): Promise<void> {
+    await this.client.logout();
+    clearSessionCookies();
+  }
 }

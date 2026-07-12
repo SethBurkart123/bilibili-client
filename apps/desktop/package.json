@@ -16,10 +16,12 @@
     "@bili/api": "workspace:*",
     "@bili/player": "workspace:*",
     "@bili/translate": "workspace:*",
-    "@bili/types": "workspace:*"
+    "@bili/types": "workspace:*",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
