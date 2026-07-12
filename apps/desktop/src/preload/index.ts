@@ -18,6 +18,13 @@ const bili: BiliBridge = {
     ipcRenderer.invoke("bili:translate", texts, opts),
   getSettings: () => ipcRenderer.invoke("bili:getSettings"),
   setSettings: (s: TranslatorSettings) => ipcRenderer.invoke("bili:setSettings", s),
+  getSubtitles: (id: VideoId, cid: number) =>
+    ipcRenderer.invoke("bili:getSubtitles", id, cid),
+  getSubtitleLines: (url: string) => ipcRenderer.invoke("bili:getSubtitleLines", url),
+  loginQrStart: () => ipcRenderer.invoke("bili:loginQrStart"),
+  loginQrPoll: (qrcodeKey: string) => ipcRenderer.invoke("bili:loginQrPoll", qrcodeKey),
+  getLoginState: () => ipcRenderer.invoke("bili:getLoginState"),
+  logout: () => ipcRenderer.invoke("bili:logout"),
 };
 
 contextBridge.exposeInMainWorld("bili", bili);

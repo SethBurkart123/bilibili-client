@@ -148,6 +148,13 @@ export function VideoPage({ video }: Props) {
     };
   }, [fed, iframeLoaded, refreshStreams]);
 
+  // Drop cached rows when toggling off so a later toggle-on retries after silent provider fallbacks.
+  useEffect(() => {
+    if (!translateComments) {
+      setTranslations(new Map());
+    }
+  }, [translateComments]);
+
   const onNeedTranslate = useCallback((items: CommentItem[]) => {
     if (!translateComments || items.length === 0) return;
     const pending = items.filter((item) => !translationsRef.current.has(item.rpid));

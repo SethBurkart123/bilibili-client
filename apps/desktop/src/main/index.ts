@@ -41,6 +41,12 @@ const BRIDGE_METHODS = [
   "translate",
   "getSettings",
   "setSettings",
+  "getSubtitles",
+  "getSubtitleLines",
+  "loginQrStart",
+  "loginQrPoll",
+  "getLoginState",
+  "logout",
 ] as const satisfies ReadonlyArray<keyof BiliBridge>;
 
 function registerIpc(): void {

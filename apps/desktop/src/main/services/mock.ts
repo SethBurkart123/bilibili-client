@@ -1,4 +1,9 @@
 import type {
+  LoginPollResult,
+  LoginQr,
+  LoginState,
+  SubtitleLine,
+  SubtitleTrackInfo,
   TranslateOptions,
   TranslatorSettings,
   VideoId,
@@ -91,5 +96,34 @@ export class MockBiliService implements BiliBridge {
     this.settings = structuredClone(s);
     this.settingsLoaded = true;
     saveSettings(this.settings);
+  }
+
+  async getSubtitles(_id: VideoId, _cid: number): Promise<SubtitleTrackInfo[]> {
+    await latency();
+    return [];
+  }
+
+  async getSubtitleLines(_url: string): Promise<SubtitleLine[]> {
+    await latency();
+    return [];
+  }
+
+  async loginQrStart(): Promise<LoginQr> {
+    await latency();
+    return { url: "https://example.invalid/qr", qrcodeKey: "mock" };
+  }
+
+  async loginQrPoll(_qrcodeKey: string): Promise<LoginPollResult> {
+    await latency();
+    return { status: "waiting" };
+  }
+
+  async getLoginState(): Promise<LoginState> {
+    await latency();
+    return { loggedIn: false };
+  }
+
+  async logout(): Promise<void> {
+    await latency();
   }
 }

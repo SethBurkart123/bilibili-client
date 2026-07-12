@@ -29,9 +29,11 @@ export default function App() {
     setError(null);
     try {
       const video = await bridge.resolveVideo(trimmed);
-      setRecent(pushRecent({ url: trimmed, title: video.title, visitedAt: Date.now() }));
-      setUrl(trimmed);
-      setView({ kind: "video", video, sourceUrl: trimmed });
+      // Always replace with a single canonical URL — never keep a pasted/concatenated raw value.
+      const canonical = `https://www.bilibili.com/video/${video.bvid}`;
+      setRecent(pushRecent({ url: canonical, title: video.title, visitedAt: Date.now() }));
+      setUrl(canonical);
+      setView({ kind: "video", video, sourceUrl: canonical });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -72,11 +74,13 @@ export default function App() {
               className="url-input"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
                 if (e.key === "Enter") onHeaderSubmit();
               }}
               placeholder="bilibili URL / BV id"
               aria-label="Video URL"
+              autoComplete="off"
             />
             <button
               type="button"

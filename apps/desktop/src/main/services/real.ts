@@ -9,7 +9,12 @@ import {
   withCache,
 } from "@bili/translate";
 import type {
+  LoginPollResult,
+  LoginQr,
+  LoginState,
   PlayUrlResult,
+  SubtitleLine,
+  SubtitleTrackInfo,
   TranslateOptions,
   Translator,
   TranslatorSettings,
@@ -89,11 +94,25 @@ export class RealBiliService implements BiliBridge {
   }
 
   async translate(texts: string[], opts?: TranslateOptions): Promise<string[]> {
-    return this.translator.translateBatch(texts, {
+    const results = await this.translator.translateBatch(texts, {
       from: opts?.from ?? "zh-CN",
       to: opts?.to ?? this.settings.targetLang,
       context: opts?.context,
     });
+    if (texts.length > 0) {
+      let identical = 0;
+      for (let i = 0; i < texts.length; i++) {
+        if (results[i] === texts[i]) identical++;
+      }
+      if (identical / texts.length >= 0.5) {
+        console.warn(
+          `[translate] ${identical}/${texts.length} results identical to input` +
+            (opts?.context ? ` (context: ${opts.context})` : "") +
+            " — provider may have failed silently",
+        );
+      }
+    }
+    return results;
   }
 
   async getSettings(): Promise<TranslatorSettings> {
@@ -105,4 +124,27 @@ export class RealBiliService implements BiliBridge {
     saveSettings(this.settings);
     this.rebuildTranslator();
   }
+
+  // Neutral stubs — login/subtitles lanes fill these in.
+  async getSubtitles(_id: VideoId, _cid: number): Promise<SubtitleTrackInfo[]> {
+    return [];
+  }
+
+  async getSubtitleLines(_url: string): Promise<SubtitleLine[]> {
+    return [];
+  }
+
+  async loginQrStart(): Promise<LoginQr> {
+    return { url: "https://example.invalid/qr", qrcodeKey: "mock" };
+  }
+
+  async loginQrPoll(_qrcodeKey: string): Promise<LoginPollResult> {
+    return { status: "waiting" };
+  }
+
+  async getLoginState(): Promise<LoginState> {
+    return { loggedIn: false };
+  }
+
+  async logout(): Promise<void> {}
 }
