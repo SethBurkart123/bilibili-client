@@ -349,19 +349,31 @@ async function setup() {
         recieveSources(e.data, () => {});
       } else if (e.data?.type === 'subtitles') {
         // bilibili-client patch: runtime subtitle injection
+        // Load every track first, then activate — mid-loop activateTrack must not
+        // skip remaining tracks if it throws or looks up a not-yet-registered track.
         if (!window.fastStream) return;
         const subs = e.data.subtitles || [];
         const activateLabel = e.data.activateLabel;
+        let activateReturned = null;
         for (const sub of subs) {
+          if (!sub || typeof sub.data !== 'string') continue;
           const track = new SubtitleTrack(sub.label, sub.language);
           try {
             track.loadText(sub.data);
+            // Match recieveSources: empty-cue tracks are dropped by FastStream.
             if (track.cues.length > 0) {
               const returned = window.fastStream.loadSubtitleTrack(track, false);
               if (activateLabel && sub.label === activateLabel) {
-                window.fastStream.interfaceController.subtitlesManager.activateTrack(returned);
+                activateReturned = returned;
               }
             }
+          } catch (err) {
+            console.error(err);
+          }
+        }
+        if (activateReturned) {
+          try {
+            window.fastStream.interfaceController.subtitlesManager.activateTrack(activateReturned);
           } catch (err) {
             console.error(err);
           }

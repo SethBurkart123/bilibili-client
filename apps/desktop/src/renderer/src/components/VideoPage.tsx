@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommentItem, SubtitleLine, SubtitleTrackInfo, VideoInfo } from "@bili/types";
-import { feedPlayer, mergeDualLines, subtitleLinesToVtt } from "@bili/player";
+import { addSubtitleTracks, feedPlayer, mergeDualLines, subtitleLinesToVtt } from "@bili/player";
 import type { FeedSubtitleTrack } from "@bili/player";
 import { bridge } from "../lib/bridge";
 import { formatCount } from "../lib/format";
@@ -11,26 +11,34 @@ interface Props {
   sessionEpoch: number;
 }
 
-type CaptionMode = "original" | "translated" | "dual";
-
 const REFRESH_COOLDOWN_MS = 15_000;
 const STALL_GRACE_MS = 8_000;
 const TRANSLATE_BATCH = 50;
 const PLAYER_SRC = "/player/index.html";
+const EN_LABEL = "English (translated)";
+const DUAL_LABEL = "Dual (EN + 中文)";
 
-/** Session-scoped VTT cache: cid + track url + mode → built subtitle track. */
-const vttCache = new Map<string, FeedSubtitleTrack>();
-
-function cacheKey(cid: number, trackUrl: string, mode: CaptionMode): string {
-  return `${cid}|${trackUrl}|${mode}`;
+interface CaptionCacheEntry {
+  lines: SubtitleLine[];
+  original: FeedSubtitleTrack;
+  translated?: FeedSubtitleTrack[];
 }
 
-function modeLabel(track: SubtitleTrackInfo, mode: CaptionMode, targetLang: string): string {
-  if (mode === "original") return track.lanDoc;
-  if (mode === "dual") return "Dual";
-  const lang = targetLang.trim() || "en";
-  const pretty = lang.toLowerCase() === "en" ? "English" : lang;
-  return `${pretty} (translated)`;
+/** Session-scoped cache keyed by cid + track url. */
+const captionCache = new Map<string, CaptionCacheEntry>();
+
+function cacheKey(cid: number, trackUrl: string): string {
+  return `${cid}|${trackUrl}`;
+}
+
+function originalLabel(track: SubtitleTrackInfo): string {
+  return track.lanDoc + (track.aiGenerated ? " (AI)" : "");
+}
+
+function pickTranslateSource(tracks: SubtitleTrackInfo[]): SubtitleTrackInfo {
+  return (
+    tracks.find((t) => t.lan.startsWith("zh") || t.lan.startsWith("ai-zh")) ?? tracks[0]!
+  );
 }
 
 async function translateAllLines(
@@ -58,14 +66,23 @@ async function translateAllLines(
   return out;
 }
 
-function waitForIframeLoad(iframe: HTMLIFrameElement): Promise<void> {
-  return new Promise((resolve) => {
-    const onLoad = () => {
-      iframe.removeEventListener("load", onLoad);
-      resolve();
-    };
-    iframe.addEventListener("load", onLoad);
-  });
+async function ensureOriginalCached(
+  cid: number,
+  track: SubtitleTrackInfo,
+): Promise<CaptionCacheEntry> {
+  const key = cacheKey(cid, track.url);
+  const existing = captionCache.get(key);
+  if (existing) return existing;
+
+  const lines = await bridge.getSubtitleLines(track.url);
+  const label = originalLabel(track);
+  const vtt = subtitleLinesToVtt(lines, { label });
+  const entry: CaptionCacheEntry = {
+    lines,
+    original: { label, language: track.lan, vtt },
+  };
+  captionCache.set(key, entry);
+  return entry;
 }
 
 async function seekAndPlay(iframe: HTMLIFrameElement, time: number): Promise<void> {
@@ -102,54 +119,45 @@ export function VideoPage({ video, sessionEpoch }: Props) {
   translationsRef.current = translations;
 
   const [tracks, setTracks] = useState<SubtitleTrackInfo[] | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [captionProgress, setCaptionProgress] = useState<number | null>(null);
+  const [translateProgress, setTranslateProgress] = useState<number | null>(null);
+  const [captionsTranslated, setCaptionsTranslated] = useState(false);
   const [captionError, setCaptionError] = useState<string | null>(null);
-  const [activeCaption, setActiveCaption] = useState<string | null>(null);
   const subtitlesRef = useRef<FeedSubtitleTrack[] | undefined>(undefined);
+  /** Translated tracks to re-inject after a feed (stream-expiry / login). */
+  const translatedTracksRef = useRef<FeedSubtitleTrack[] | undefined>(undefined);
   const pendingSeekRef = useRef<number | null>(null);
-  /** When true, the next iframeLoaded→feed effect is skipped (manual feed already done). */
-  const skipAutoFeedRef = useRef(false);
 
   const lastRefreshAt = useRef(0);
   const lastFeedAt = useRef(0);
   const refreshing = useRef(false);
   const sessionEpochRef = useRef(sessionEpoch);
 
-  const feed = useCallback((xml: string) => {
+  const reinjectTranslated = useCallback(() => {
     const iframe = iframeRef.current;
-    if (!iframe?.contentWindow) return;
-    const subs = subtitlesRef.current;
-    feedPlayer(iframe, xml, subs ? { subtitles: subs } : undefined);
-    lastFeedAt.current = Date.now();
-    setFed(true);
-
-    const seekTo = pendingSeekRef.current;
-    if (seekTo != null) {
-      pendingSeekRef.current = null;
-      void seekAndPlay(iframe, seekTo);
-    }
+    const translated = translatedTracksRef.current;
+    if (!iframe?.contentWindow || !translated?.length) return;
+    addSubtitleTracks(iframe, translated, { activateLabel: EN_LABEL });
   }, []);
 
-  const reloadPlayerAndFeed = useCallback(
-    async (xml: string, seekTo: number) => {
+  const feed = useCallback(
+    (xml: string) => {
       const iframe = iframeRef.current;
-      if (!iframe) return;
-      pendingSeekRef.current = seekTo;
-      skipAutoFeedRef.current = true;
-      setIframeLoaded(false);
-      setFed(false);
-      // Force a real navigation even when src is already PLAYER_SRC.
-      const blankLoad = waitForIframeLoad(iframe);
-      iframe.src = "about:blank";
-      await blankLoad;
-      const playerLoad = waitForIframeLoad(iframe);
-      iframe.src = PLAYER_SRC;
-      await playerLoad;
-      setIframeLoaded(true);
-      feed(xml);
+      if (!iframe?.contentWindow) return;
+      const subs = subtitlesRef.current;
+      feedPlayer(iframe, xml, subs ? { subtitles: subs } : undefined);
+      lastFeedAt.current = Date.now();
+      setFed(true);
+
+      const seekTo = pendingSeekRef.current;
+      if (seekTo != null) {
+        pendingSeekRef.current = null;
+        void seekAndPlay(iframe, seekTo);
+      }
+
+      // Re-inject user-translated tracks after re-feed (from cache; no re-translation).
+      reinjectTranslated();
     },
-    [feed],
+    [reinjectTranslated],
   );
 
   const refreshStreams = useCallback(async (reason: string) => {
@@ -165,19 +173,18 @@ export function VideoPage({ video, sessionEpoch }: Props) {
         { bvid: video.bvid, aid: video.aid },
         video.cid,
       );
-      setMpdXml(next);
-      if (iframeRef.current && iframeLoaded && reason === "login") {
+      // Capture position before re-feed; the mpdXml effect feeds + seeks + re-injects.
+      if (iframeRef.current && iframeLoaded) {
         const videoEl = iframeRef.current.contentDocument?.querySelector("video");
-        await reloadPlayerAndFeed(next, videoEl?.currentTime ?? 0);
-      } else if (iframeRef.current && iframeLoaded) {
-        feed(next);
+        pendingSeekRef.current = videoEl?.currentTime ?? 0;
       }
+      setMpdXml(next);
     } catch (err) {
       setMetaError(err instanceof Error ? err.message : String(err));
     } finally {
       refreshing.current = false;
     }
-  }, [feed, iframeLoaded, reloadPlayerAndFeed, video.aid, video.bvid, video.cid]);
+  }, [iframeLoaded, video.aid, video.bvid, video.cid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,11 +196,11 @@ export function VideoPage({ video, sessionEpoch }: Props) {
     setTranslations(new Map());
     setShowOriginalDesc(false);
     setTracks(null);
-    setMenuOpen(false);
-    setCaptionProgress(null);
+    setTranslateProgress(null);
+    setCaptionsTranslated(false);
     setCaptionError(null);
-    setActiveCaption(null);
     subtitlesRef.current = undefined;
+    translatedTracksRef.current = undefined;
     pendingSeekRef.current = null;
     lastRefreshAt.current = 0;
     lastFeedAt.current = 0;
@@ -208,6 +215,25 @@ export function VideoPage({ video, sessionEpoch }: Props) {
           bridge.getSubtitles({ bvid: video.bvid, aid: video.aid }, video.cid),
         ]);
         if (cancelled) return;
+
+        const originals = await Promise.all(
+          subs.map((track) => ensureOriginalCached(video.cid, track)),
+        );
+        if (cancelled) return;
+
+        subtitlesRef.current =
+          originals.length > 0 ? originals.map((e) => e.original) : undefined;
+
+        // Restore prior session translation for this cid's preferred track, if any.
+        if (subs.length > 0) {
+          const source = pickTranslateSource(subs);
+          const cached = captionCache.get(cacheKey(video.cid, source.url));
+          if (cached?.translated) {
+            translatedTracksRef.current = cached.translated;
+            setCaptionsTranslated(true);
+          }
+        }
+
         setMpdXml(xml);
         setTitleEn(translated[0] ?? null);
         setDescEn(translated[1] ?? null);
@@ -232,10 +258,6 @@ export function VideoPage({ video, sessionEpoch }: Props) {
 
   useEffect(() => {
     if (!iframeLoaded || !mpdXml) return;
-    if (skipAutoFeedRef.current) {
-      skipAutoFeedRef.current = false;
-      return;
-    }
     feed(mpdXml);
   }, [feed, iframeLoaded, mpdXml]);
 
@@ -293,89 +315,90 @@ export function VideoPage({ video, sessionEpoch }: Props) {
     }
   }, [translateComments]);
 
-  const onNeedTranslate = useCallback((items: CommentItem[]) => {
-    if (!translateComments || items.length === 0) return;
-    const pending = items.filter((item) => !translationsRef.current.has(item.rpid));
-    if (pending.length === 0) return;
-    const texts = pending.map((item) => item.message);
-    void bridge.translate(texts, { context: "bilibili video comments" }).then((results) => {
-      setTranslations((prev) => {
-        const next = new Map(prev);
-        pending.forEach((item, i) => {
-          next.set(item.rpid, results[i] ?? item.message);
+  const onNeedTranslate = useCallback(
+    (items: CommentItem[]) => {
+      if (!translateComments || items.length === 0) return;
+      const pending = items.filter((item) => !translationsRef.current.has(item.rpid));
+      if (pending.length === 0) return;
+      const texts = pending.map((item) => item.message);
+      void bridge.translate(texts, { context: "bilibili video comments" }).then((results) => {
+        setTranslations((prev) => {
+          const next = new Map(prev);
+          pending.forEach((item, i) => {
+            next.set(item.rpid, results[i] ?? item.message);
+          });
+          return next;
         });
-        return next;
       });
-    });
-  }, [translateComments]);
-
-  const applyCaption = useCallback(
-    async (track: SubtitleTrackInfo, mode: CaptionMode) => {
-      if (!mpdXml) return;
-      const iframe = iframeRef.current;
-      if (!iframe) return;
-
-      const key = cacheKey(video.cid, track.url, mode);
-      setCaptionError(null);
-      setMenuOpen(false);
-
-      try {
-        let built = vttCache.get(key);
-        if (!built) {
-          const lines = await bridge.getSubtitleLines(track.url);
-          const settings = await bridge.getSettings();
-          const targetLang = settings.targetLang || "en";
-          const label = modeLabel(track, mode, targetLang);
-          let vttLines: SubtitleLine[];
-          let language = track.lan;
-
-          if (mode === "original") {
-            vttLines = lines;
-            setCaptionProgress(null);
-          } else {
-            setCaptionProgress(0);
-            const translated = await translateAllLines(lines, setCaptionProgress);
-            if (mode === "translated") {
-              vttLines = lines.map((line, i) => ({
-                from: line.from,
-                to: line.to,
-                content: translated[i] ?? line.content,
-              }));
-              language = targetLang;
-            } else {
-              vttLines = mergeDualLines(lines, translated);
-            }
-            setCaptionProgress(null);
-          }
-
-          const vtt = subtitleLinesToVtt(vttLines, { label });
-          built = { label, language, vtt };
-          vttCache.set(key, built);
-        }
-
-        const videoEl = iframe.contentDocument?.querySelector("video");
-        const t = videoEl?.currentTime ?? 0;
-        subtitlesRef.current = [built];
-        setActiveCaption(built.label);
-        await reloadPlayerAndFeed(mpdXml, t);
-      } catch (err) {
-        setCaptionProgress(null);
-        skipAutoFeedRef.current = false;
-        setCaptionError(err instanceof Error ? err.message : String(err));
-      }
     },
-    [mpdXml, reloadPlayerAndFeed, video.cid],
+    [translateComments],
   );
+
+  const onTranslateCaptions = useCallback(async () => {
+    if (!tracks?.length || captionsTranslated || translateProgress != null) return;
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+
+    const source = pickTranslateSource(tracks);
+    const key = cacheKey(video.cid, source.url);
+    setCaptionError(null);
+
+    try {
+      let entry = captionCache.get(key);
+      if (!entry) {
+        entry = await ensureOriginalCached(video.cid, source);
+      }
+
+      if (entry.translated) {
+        translatedTracksRef.current = entry.translated;
+        setCaptionsTranslated(true);
+        addSubtitleTracks(iframe, entry.translated, { activateLabel: EN_LABEL });
+        return;
+      }
+
+      setTranslateProgress(0);
+      const translatedTexts = await translateAllLines(entry.lines, setTranslateProgress);
+      const enLines = entry.lines.map((line, i) => ({
+        from: line.from,
+        to: line.to,
+        content: translatedTexts[i] ?? line.content,
+      }));
+      const dualLines = mergeDualLines(entry.lines, translatedTexts);
+      const built: FeedSubtitleTrack[] = [
+        {
+          label: EN_LABEL,
+          language: "en",
+          vtt: subtitleLinesToVtt(enLines, { label: EN_LABEL }),
+        },
+        {
+          label: DUAL_LABEL,
+          language: "en",
+          vtt: subtitleLinesToVtt(dualLines, { label: DUAL_LABEL }),
+        },
+      ];
+      entry.translated = built;
+      captionCache.set(key, entry);
+      translatedTracksRef.current = built;
+      setTranslateProgress(null);
+      setCaptionsTranslated(true);
+      addSubtitleTracks(iframe, built, { activateLabel: EN_LABEL });
+    } catch (err) {
+      setTranslateProgress(null);
+      setCaptionError(err instanceof Error ? err.message : String(err));
+    }
+  }, [captionsTranslated, tracks, translateProgress, video.cid]);
 
   const descText = descEn && !showOriginalDesc ? descEn : video.desc;
   const showSpinner = !fed && !metaError;
   const noCaptions = tracks !== null && tracks.length === 0;
-  const ccLabel =
-    captionProgress != null
-      ? `${captionProgress}%`
-      : activeCaption
-        ? "CC"
-        : "CC";
+  const hasCaptions = tracks !== null && tracks.length > 0;
+
+  let translateBtnLabel = "Translate captions";
+  if (captionsTranslated) {
+    translateBtnLabel = "Captions translated ✓";
+  } else if (translateProgress != null) {
+    translateBtnLabel = `Translating… ${translateProgress}%`;
+  }
 
   return (
     <div className="video-page">
@@ -397,58 +420,17 @@ export function VideoPage({ video, sessionEpoch }: Props) {
           )}
         </div>
         <div className="player-bar">
-          <div className="captions-control">
+          {noCaptions && <span className="captions-note">No captions available</span>}
+          {hasCaptions && (
             <button
               type="button"
-              className={`cc-btn${activeCaption ? " active" : ""}`}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              disabled={tracks === null || captionProgress != null}
-              onClick={() => setMenuOpen((o) => !o)}
-              title="Captions"
+              className={`translate-captions-btn${captionsTranslated ? " done" : ""}`}
+              disabled={captionsTranslated || translateProgress != null}
+              onClick={() => void onTranslateCaptions()}
             >
-              {captionProgress != null ? `${captionProgress}%` : ccLabel}
+              {translateBtnLabel}
             </button>
-            {menuOpen && (
-              <div className="captions-menu" role="menu">
-                {noCaptions ? (
-                  <div className="captions-empty">No captions available</div>
-                ) : (
-                  tracks?.map((track) => (
-                    <div key={track.url} className="captions-track">
-                      <div className="captions-track-label">
-                        <span>{track.lanDoc}</span>
-                        {track.aiGenerated && <span className="ai-badge">AI</span>}
-                      </div>
-                      <div className="captions-track-actions">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => void applyCaption(track, "original")}
-                        >
-                          Original
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => void applyCaption(track, "translated")}
-                        >
-                          Translated
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => void applyCaption(track, "dual")}
-                        >
-                          Dual
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+          )}
           {captionError && <span className="captions-error">{captionError}</span>}
         </div>
         <div className="video-meta">

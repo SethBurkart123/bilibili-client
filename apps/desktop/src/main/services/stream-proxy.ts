@@ -95,6 +95,18 @@ export class StreamProxy {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // the player iframe lives on the renderer's origin, so every media XHR to this
+    // loopback server is cross-origin and needs CORS (Range triggers a preflight)
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, Content-Type");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
+        "Access-Control-Max-Age": "86400",
+      }).end();
+      return;
+    }
     if (req.method !== "GET" || !req.url) {
       res.writeHead(405).end();
       return;

@@ -400,3 +400,81 @@ describe("mergeDualLines", () => {
     ).toThrow(RangeError);
   });
 });
+
+/**
+ * Decisive gate: FastStream's handler drops tracks with cues.length === 0.
+ * Assert subtitleLinesToVtt output parses under the vendored WebVTT.Parser
+ * (same path SubtitleTrack.loadText uses) so empty-cue drops are not silent.
+ */
+describe("vendored WebVTT.Parser cue count", () => {
+  /** Mirrors SubtitleTrack.loadText cue collection against vendor/vtt.mjs. */
+  async function parseVttCues(text: string): Promise<Array<{ text: string }>> {
+    class VTTCuePolyfill {
+      startTime: number;
+      endTime: number;
+      text: string;
+      id = "";
+      align = "center";
+      constructor(startTime: number, endTime: number, text: string) {
+        this.startTime = startTime;
+        this.endTime = endTime;
+        this.text = text;
+      }
+    }
+    const g = globalThis as typeof globalThis & {
+      window: typeof globalThis;
+      VTTCue: typeof VTTCuePolyfill;
+      VTTRegion: new () => object;
+      WebVTT?: unknown;
+    };
+    g.window = globalThis;
+    g.VTTCue = VTTCuePolyfill;
+    g.VTTRegion = class {};
+
+    const { WebVTT } = await import(
+      "../../../vendor/faststream/chrome/player/modules/vtt.mjs"
+    );
+    const cues: Array<{ text: string }> = [];
+    // Same call shape as SubtitleTrack.loadText
+    const parser = new WebVTT.Parser(g.window, WebVTT.StringDecoder());
+    parser.oncue = (cue: { text: string }) => {
+      cues.push({ text: cue.text });
+    };
+    parser.parse(text);
+    parser.flush();
+    return cues;
+  }
+
+  const zhLines: SubtitleLine[] = [
+    { from: 0.5, to: 2.0, content: "你好世界" },
+    { from: 2.5, to: 4.0, content: "这是第二句" },
+    { from: 3661.5, to: 3663.25, content: "超过一小时" },
+    { from: 7200.0, to: 7202.5, content: "两小时处" },
+  ];
+  const enTexts = [
+    "Hello world",
+    "This is the second line",
+    "Over an hour",
+    "At two hours",
+  ];
+
+  test("English (translated) VTT yields cues.length === lines.length", async () => {
+    const enLines = zhLines.map((l, i) => ({
+      from: l.from,
+      to: l.to,
+      content: enTexts[i]!,
+    }));
+    const vtt = subtitleLinesToVtt(enLines, { label: "English (translated)" });
+    const cues = await parseVttCues(vtt);
+    expect(cues.length).toBe(enLines.length);
+  });
+
+  test("Dual track with embedded newlines parses all cues", async () => {
+    const dual = mergeDualLines(zhLines, enTexts);
+    const vtt = subtitleLinesToVtt(dual, { label: "Dual (EN + 中文)" });
+    const cues = await parseVttCues(vtt);
+    expect(cues.length).toBe(dual.length);
+    expect(cues[0]!.text).toBe("Hello world\n你好世界");
+    expect(cues[2]!.text).toContain("\n");
+  });
+});
