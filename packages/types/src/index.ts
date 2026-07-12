@@ -156,6 +156,63 @@ export interface TranslatorSettings {
   provider: TranslatorProvider;
   targetLang: string;
   openai?: { baseURL: string; apiKey: string; model: string };
+  ui?: {
+    /** show the original text on hover over translated comments (default true) */
+    showOriginalOnHover?: boolean;
+  };
+}
+
+// ---------- channels & search ----------
+
+export interface ChannelInfo {
+  mid: number;
+  name: string;
+  face: string;
+  /** channel bio / signature */
+  sign: string;
+  follower?: number;
+}
+
+/** a video card in channel listings and search results */
+export interface VideoCard {
+  bvid: string;
+  aid?: number;
+  title: string;
+  pic: string;
+  /** seconds when numeric; search returns "MM:SS" strings */
+  duration?: number | string;
+  pubdate?: number;
+  views?: number;
+  danmaku?: number;
+  authorName?: string;
+  authorMid?: number;
+}
+
+export interface ChannelVideosPage {
+  items: VideoCard[];
+  total: number;
+  hasMore: boolean;
+}
+
+export interface UserCard {
+  mid: number;
+  name: string;
+  face: string;
+  sign: string;
+  followers: number;
+  videos: number;
+}
+
+export interface SearchVideosPage {
+  items: VideoCard[];
+  hasMore: boolean;
+  page: number;
+}
+
+export interface SearchUsersPage {
+  items: UserCard[];
+  hasMore: boolean;
+  page: number;
 }
 
 // ---------- subtitles ----------
@@ -218,6 +275,10 @@ export interface BiliBridge {
   getSubtitles(id: VideoId, cid: number): Promise<SubtitleTrackInfo[]>;
   /** fetch + parse a subtitle track's timed lines */
   getSubtitleLines(url: string): Promise<SubtitleLine[]>;
+  getChannelInfo(mid: number): Promise<ChannelInfo>;
+  getChannelVideos(mid: number, page: number): Promise<ChannelVideosPage>;
+  searchVideos(keyword: string, page: number): Promise<SearchVideosPage>;
+  searchUsers(keyword: string, page: number): Promise<SearchUsersPage>;
   loginQrStart(): Promise<LoginQr>;
   /** on "success" the main process persists session cookies before resolving */
   loginQrPoll(qrcodeKey: string): Promise<LoginPollResult>;
