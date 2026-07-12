@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import type { DashInfo } from "@bili/types";
+import type { DashInfo, SubtitleLine } from "@bili/types";
 import { buildMpd, mpdToDataUri } from "../src/mpd";
 import { feedPlayer, ACCELERATED_DASH } from "../src/feed";
+import { mergeDualLines, subtitleLinesToVtt } from "../src/subtitles";
 
 beforeAll(() => {
   Object.defineProperty(globalThis, "location", {
@@ -220,5 +221,119 @@ describe("feedPlayer", () => {
       sources: Array<{ headers: Record<string, string> }>;
     };
     expect(data.sources[0]!.headers).toEqual({});
+  });
+
+  test("maps two subtitle tracks to inline {label,language,data} wire shape", () => {
+    const posted: unknown[] = [];
+    const fakeIframe = {
+      contentWindow: {
+        postMessage(data: unknown) {
+          posted.push(data);
+        },
+      },
+    } as unknown as HTMLIFrameElement;
+
+    const vttZh = subtitleLinesToVtt([
+      { from: 0, to: 1, content: "你好" },
+    ]);
+    const vttEn = subtitleLinesToVtt([
+      { from: 0, to: 1, content: "Hello" },
+    ]);
+
+    feedPlayer(fakeIframe, "<MPD/>", {
+      subtitles: [
+        { label: "Chinese", language: "zh-CN", vtt: vttZh },
+        { label: "English", language: "en", vtt: vttEn },
+      ],
+    });
+
+    const data = posted[0] as {
+      type: string;
+      autoSetSource: boolean;
+      subtitles: Array<{ label: string; language: string; data: string }>;
+    };
+
+    // Wire shape from main.mjs recieveSources / loadSubtitles:
+    // inline tracks use { label, language, data } (data = VTT text).
+    expect(data.type).toBe("sources");
+    expect(data.autoSetSource).toBe(true);
+    expect(data.subtitles).toEqual([
+      { label: "Chinese", language: "zh-CN", data: vttZh },
+      { label: "English", language: "en", data: vttEn },
+    ]);
+    for (const sub of data.subtitles) {
+      expect(sub).not.toHaveProperty("source");
+      expect(sub).not.toHaveProperty("vtt");
+      expect(sub.data.startsWith("WEBVTT")).toBe(true);
+    }
+  });
+});
+
+describe("subtitleLinesToVtt", () => {
+  test("formats >1h timestamps as HH:MM:SS.mmm", () => {
+    const vtt = subtitleLinesToVtt([
+      { from: 3661.5, to: 3663.25, content: "over an hour" },
+    ]);
+    expect(vtt).toContain("01:01:01.500 --> 01:01:03.250");
+    expect(vtt.startsWith("WEBVTT")).toBe(true);
+  });
+
+  test("escapes &, <, > in cue text", () => {
+    const vtt = subtitleLinesToVtt([
+      { from: 0, to: 1, content: "A & B <C> >D" },
+    ]);
+    expect(vtt).toContain("A &amp; B &lt;C&gt; &gt;D");
+    const cueText = vtt.split("\n").find((l) => l.includes("&amp;"))!;
+    expect(cueText.includes("<")).toBe(false);
+    expect(cueText.includes(">")).toBe(false);
+    expect(cueText.replace(/&(?:amp|lt|gt);/g, "").includes("&")).toBe(false);
+  });
+
+  test("clamps zero/negative duration to +0.5s", () => {
+    const zero = subtitleLinesToVtt([{ from: 10, to: 10, content: "z" }]);
+    expect(zero).toContain("00:00:10.000 --> 00:00:10.500");
+
+    const neg = subtitleLinesToVtt([{ from: 5, to: 3, content: "n" }]);
+    expect(neg).toContain("00:00:05.000 --> 00:00:05.500");
+  });
+
+  test("sorts cues by start time", () => {
+    const vtt = subtitleLinesToVtt([
+      { from: 2, to: 3, content: "second" },
+      { from: 0.5, to: 1, content: "first" },
+      { from: 4, to: 5, content: "third" },
+    ]);
+    const firstIdx = vtt.indexOf("first");
+    const secondIdx = vtt.indexOf("second");
+    const thirdIdx = vtt.indexOf("third");
+    expect(firstIdx).toBeLessThan(secondIdx);
+    expect(secondIdx).toBeLessThan(thirdIdx);
+  });
+
+  test("optional label becomes WEBVTT file description", () => {
+    const vtt = subtitleLinesToVtt([{ from: 0, to: 1, content: "x" }], {
+      label: "Chinese",
+    });
+    expect(vtt.startsWith("WEBVTT Chinese\n")).toBe(true);
+  });
+});
+
+describe("mergeDualLines", () => {
+  test("places translated text above original", () => {
+    const original: SubtitleLine[] = [
+      { from: 0, to: 1, content: "你好" },
+      { from: 1, to: 2, content: "世界" },
+    ];
+    const merged = mergeDualLines(original, ["Hello", "World"]);
+    expect(merged).toEqual([
+      { from: 0, to: 1, content: "Hello\n你好" },
+      { from: 1, to: 2, content: "World\n世界" },
+    ]);
+  });
+
+  test("throws RangeError on length mismatch", () => {
+    expect(() =>
+      mergeDualLines([{ from: 0, to: 1, content: "a" }], ["x", "y"]),
+    ).toThrow(RangeError);
   });
 });
