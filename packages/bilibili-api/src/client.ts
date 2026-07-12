@@ -1,10 +1,14 @@
 import type {
+  ChannelInfo,
+  ChannelVideosPage,
   CommentPage,
   LoginPollResult,
   LoginPollStatus,
   LoginQr,
   LoginState,
   PlayUrlResult,
+  SearchUsersPage,
+  SearchVideosPage,
   SubtitleLine,
   SubtitleTrackInfo,
   VideoId,
@@ -12,8 +16,12 @@ import type {
 } from "@bili/types";
 import {
   normalizeCommentPage,
+  normalizeChannelInfo,
+  normalizeChannelVideos,
   normalizePlayUrl,
   normalizeReplyPage,
+  normalizeSearchUsers,
+  normalizeSearchVideos,
   normalizeSubtitleLines,
   normalizeSubtitles,
   normalizeVideoInfo,
@@ -25,6 +33,7 @@ export const DEFAULT_USER_AGENT =
 const API_ORIGIN = "https://api.bilibili.com";
 const PASSPORT_ORIGIN = "https://passport.bilibili.com";
 const SESSION_COOKIE_NAMES = new Set(["SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid"]);
+const SEARCH_COOKIE_NAMES = new Set(["buvid3", "buvid4", "b_nut"]);
 const LOGIN_POLL_STATUSES = new Map<number, LoginPollStatus>([
   [86101, "waiting"],
   [86090, "scanned"],
@@ -125,6 +134,7 @@ export class BiliClient {
   private readonly fetchImpl: typeof fetch;
   private readonly userAgent: string;
   private bootstrapPromise: Promise<void> | undefined;
+  private webBootstrapPromise: Promise<void> | undefined;
   private wbiKeys: WbiKeys | undefined;
 
   constructor(options: BiliClientOptions = {}) {
@@ -177,6 +187,40 @@ export class BiliClient {
   async getView(id: VideoId): Promise<VideoInfo> {
     await this.bootstrap();
     return normalizeVideoInfo(await this.request("/x/web-interface/view", this.videoParams(id)));
+  }
+
+  async getChannelInfo(mid: number): Promise<ChannelInfo> {
+    await this.bootstrap();
+    return normalizeChannelInfo(mid, await this.request("/x/web-interface/card", { mid }));
+  }
+
+  async getChannelVideos(mid: number, page: number): Promise<ChannelVideosPage> {
+    await this.bootstrapWebCookies();
+    return normalizeChannelVideos(await this.request("/x/series/recArchivesByKeywords", {
+      mid,
+      keywords: "",
+      ps: 30,
+      pn: page,
+      orderby: "pubdate",
+    }));
+  }
+
+  async searchVideos(keyword: string, page: number): Promise<SearchVideosPage> {
+    await this.bootstrapWebCookies();
+    return normalizeSearchVideos(await this.signedRequest("/x/web-interface/wbi/search/type", {
+      search_type: "video",
+      keyword,
+      page,
+    }), page);
+  }
+
+  async searchUsers(keyword: string, page: number): Promise<SearchUsersPage> {
+    await this.bootstrapWebCookies();
+    return normalizeSearchUsers(await this.signedRequest("/x/web-interface/wbi/search/type", {
+      search_type: "bili_user",
+      keyword,
+      page,
+    }), page);
   }
 
   async getPlayUrl(id: VideoId, cid: number): Promise<PlayUrlResult> {
@@ -293,6 +337,17 @@ export class BiliClient {
     await this.refreshWbiKeys();
   }
 
+  private async bootstrapWebCookies(): Promise<void> {
+    if (!this.webBootstrapPromise) this.webBootstrapPromise = this.loadWebCookies();
+    return this.webBootstrapPromise;
+  }
+
+  private async loadWebCookies(): Promise<void> {
+    await this.bootstrap();
+    const response = await this.fetchImpl("https://www.bilibili.com/", { headers: this.headers() });
+    this.captureCookies(response, SEARCH_COOKIE_NAMES);
+  }
+
   private async refreshWbiKeys(): Promise<void> {
     const nav = (await this.request("/x/web-interface/nav", {}, [-101])) as Record<string, unknown>;
     const image = (nav.wbi_img ?? {}) as Record<string, unknown>;
@@ -324,6 +379,18 @@ export class BiliClient {
   }
 
   private captureSessionCookies(response: Response, url: unknown): void {
+    this.captureCookies(response, SESSION_COOKIE_NAMES);
+    try {
+      const params = new URL(String(url)).searchParams;
+      for (const name of SESSION_COOKIE_NAMES) {
+        if (!this.cookies.has(name) && params.has(name)) this.cookies.set(name, params.get(name)!);
+      }
+    } catch {
+      // A missing/empty success URL is valid when Set-Cookie carried the session.
+    }
+  }
+
+  private captureCookies(response: Response, names: Set<string>): void {
     const headers = response.headers as Headers & { getSetCookie?: () => string[] };
     const setCookies = headers.getSetCookie?.() ?? (headers.get("set-cookie") ? [headers.get("set-cookie")!] : []);
     for (const cookie of setCookies) {
@@ -332,15 +399,7 @@ export class BiliClient {
       if (separator === -1) continue;
       const name = pair.slice(0, separator);
       const value = pair.slice(separator + 1);
-      if (name && SESSION_COOKIE_NAMES.has(name)) this.cookies.set(name, value);
-    }
-    try {
-      const params = new URL(String(url)).searchParams;
-      for (const name of SESSION_COOKIE_NAMES) {
-        if (!this.cookies.has(name) && params.has(name)) this.cookies.set(name, params.get(name)!);
-      }
-    } catch {
-      // A missing/empty success URL is valid when Set-Cookie carried the session.
+      if (name && names.has(name)) this.cookies.set(name, value);
     }
   }
 

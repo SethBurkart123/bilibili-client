@@ -1,10 +1,16 @@
 import type {
+  ChannelInfo,
+  ChannelVideosPage,
   CommentItem,
   CommentPage,
   DashTrack,
   PlayUrlResult,
+  SearchUsersPage,
+  SearchVideosPage,
   SubtitleLine,
   SubtitleTrackInfo,
+  UserCard,
+  VideoCard,
   VideoInfo,
 } from "@bili/types";
 
@@ -15,6 +21,92 @@ const object = (value: unknown): JsonObject =>
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const number = (value: unknown): number => (typeof value === "number" ? value : Number(value) || 0);
 const string = (value: unknown): string => (typeof value === "string" ? value : "");
+
+function imageUrl(value: unknown): string {
+  const url = string(value);
+  return url.startsWith("//") ? `https:${url}` : url;
+}
+
+function withoutHighlights(value: unknown): string {
+  return string(value).replace(/<em class="keyword">([\s\S]*?)<\/em>/g, "$1");
+}
+
+function normalizeVideoCard(value: unknown): VideoCard {
+  const source = object(value);
+  const stat = object(source.stat);
+  const duration = source.duration ?? source.length;
+  return {
+    bvid: string(source.bvid),
+    ...(source.aid === undefined ? {} : { aid: number(source.aid) }),
+    title: withoutHighlights(source.title),
+    pic: imageUrl(source.pic),
+    ...(typeof duration === "number" || typeof duration === "string" ? { duration } : {}),
+    ...(source.pubdate === undefined && source.created === undefined
+      ? {}
+      : { pubdate: number(source.pubdate ?? source.created) }),
+    ...(source.play === undefined && stat.view === undefined ? {} : { views: number(source.play ?? stat.view) }),
+    ...(source.video_review === undefined && source.danmaku === undefined
+      ? {}
+      : { danmaku: number(source.video_review ?? source.danmaku) }),
+    ...(source.author === undefined ? {} : { authorName: string(source.author) }),
+    ...(source.mid === undefined && source.upMid === undefined ? {} : { authorMid: number(source.mid ?? source.upMid) }),
+  };
+}
+
+function searchHasMore(source: JsonObject, page: number): boolean {
+  const totalPages = number(source.numPages);
+  if (totalPages > 0) return page < totalPages;
+  const total = number(source.numResults);
+  const pageSize = number(source.pagesize);
+  return total > 0 && pageSize > 0 && page * pageSize < total;
+}
+
+export function normalizeChannelInfo(mid: number, data: unknown): ChannelInfo {
+  const source = object(data);
+  const card = object(source.card);
+  return {
+    mid: number(card.mid) || mid,
+    name: string(card.name),
+    face: imageUrl(card.face),
+    sign: string(card.sign),
+    ...(source.follower === undefined ? {} : { follower: number(source.follower) }),
+  };
+}
+
+export function normalizeChannelVideos(data: unknown): ChannelVideosPage {
+  const source = object(data);
+  const page = object(source.page);
+  const total = number(page.total);
+  const items = array(source.archives).map(normalizeVideoCard);
+  return {
+    items,
+    total,
+    hasMore: number(page.num) * number(page.size) < total,
+  };
+}
+
+export function normalizeSearchVideos(data: unknown, requestedPage: number): SearchVideosPage {
+  const source = object(data);
+  const page = number(source.page) || requestedPage;
+  return { items: array(source.result).map(normalizeVideoCard), hasMore: searchHasMore(source, page), page };
+}
+
+export function normalizeSearchUsers(data: unknown, requestedPage: number): SearchUsersPage {
+  const source = object(data);
+  const page = number(source.page) || requestedPage;
+  const items: UserCard[] = array(source.result).map((value) => {
+    const user = object(value);
+    return {
+      mid: number(user.mid),
+      name: withoutHighlights(user.uname),
+      face: imageUrl(user.upic),
+      sign: string(user.usign),
+      followers: number(user.fans),
+      videos: number(user.videos),
+    };
+  });
+  return { items, hasMore: searchHasMore(source, page), page };
+}
 
 export function normalizeVideoInfo(data: unknown): VideoInfo {
   const source = object(data);
