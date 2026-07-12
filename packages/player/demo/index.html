@@ -74,6 +74,7 @@
     <header>
       <h1>@bili/player · FastStream embed</h1>
       <button type="button" id="play">Load Big Buck Bunny (DASH)</button>
+      <button type="button" id="add-subs">Add subtitle track</button>
       <p id="status">Same-origin iframe · postMessage type=sources</p>
     </header>
     <div class="frame-wrap">
@@ -85,6 +86,8 @@
       ></iframe>
     </div>
     <script type="module">
+      import { addSubtitleTracks } from "/pkg/src/feed.ts";
+
       // ACCELERATED_DASH from vendor PlayerModes.mjs — mirrored for the demo URL source.
       const ACCELERATED_DASH = "accelerated_dash";
 
@@ -92,9 +95,19 @@
       const SAMPLE_MPD =
         "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd";
 
+      const DEMO_VTT = `WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+Runtime subtitle injection demo
+
+00:00:05.000 --> 00:00:08.000
+Added live without reloading the source
+`;
+
       const iframe = document.getElementById("player");
       const status = document.getElementById("status");
       const btn = document.getElementById("play");
+      const addSubsBtn = document.getElementById("add-subs");
 
       /**
        * Same payload shape as feedPlayer() / recieveSources in main.mjs.
@@ -121,6 +134,16 @@
       btn.addEventListener("click", () => {
         status.textContent = `Feeding ${SAMPLE_MPD}`;
         feedUrlSource(SAMPLE_MPD);
+      });
+
+      addSubsBtn.addEventListener("click", () => {
+        status.textContent =
+          "Adding English track via addSubtitleTracks (no source reload)";
+        addSubtitleTracks(
+          iframe,
+          [{ label: "English (demo)", language: "en", vtt: DEMO_VTT }],
+          { activateLabel: "English (demo)" },
+        );
       });
     </script>
   </body>

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { DashInfo, SubtitleLine } from "@bili/types";
 import { buildMpd, mpdToDataUri } from "../src/mpd";
-import { feedPlayer, ACCELERATED_DASH } from "../src/feed";
+import { feedPlayer, addSubtitleTracks, ACCELERATED_DASH } from "../src/feed";
 import { mergeDualLines, subtitleLinesToVtt } from "../src/subtitles";
 
 beforeAll(() => {
@@ -266,6 +266,69 @@ describe("feedPlayer", () => {
       expect(sub).not.toHaveProperty("vtt");
       expect(sub.data.startsWith("WEBVTT")).toBe(true);
     }
+  });
+});
+
+describe("addSubtitleTracks", () => {
+  test("posts the exact runtime-subtitles wire shape", () => {
+    const posted: unknown[] = [];
+    const fakeIframe = {
+      contentWindow: {
+        postMessage(data: unknown, targetOrigin: string) {
+          posted.push({ data, targetOrigin });
+        },
+      },
+    } as unknown as HTMLIFrameElement;
+
+    const vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHello\n";
+    const origin = globalThis.location.origin;
+
+    addSubtitleTracks(
+      fakeIframe,
+      [{ label: "English", language: "en", vtt }],
+      { activateLabel: "English" },
+    );
+
+    expect(posted).toHaveLength(1);
+    const msg = posted[0] as {
+      data: {
+        type: string;
+        subtitles: Array<{ label: string; language: string; data: string }>;
+        activateLabel?: string;
+      };
+      targetOrigin: string;
+    };
+
+    expect(msg.targetOrigin).toBe(origin);
+    expect(msg.data).toEqual({
+      type: "subtitles",
+      subtitles: [{ label: "English", language: "en", data: vtt }],
+      activateLabel: "English",
+    });
+    expect(msg.data.subtitles[0]).not.toHaveProperty("vtt");
+    expect(msg.data.subtitles[0]).not.toHaveProperty("source");
+  });
+
+  test("omits activateLabel when not provided", () => {
+    const posted: unknown[] = [];
+    const fakeIframe = {
+      contentWindow: {
+        postMessage(data: unknown) {
+          posted.push(data);
+        },
+      },
+    } as unknown as HTMLIFrameElement;
+
+    addSubtitleTracks(fakeIframe, [
+      { label: "Chinese", language: "zh-CN", vtt: "WEBVTT\n\n" },
+    ]);
+
+    const data = posted[0] as Record<string, unknown>;
+    expect(data.type).toBe("subtitles");
+    expect(data).not.toHaveProperty("activateLabel");
+    expect(data.subtitles).toEqual([
+      { label: "Chinese", language: "zh-CN", data: "WEBVTT\n\n" },
+    ]);
   });
 });
 

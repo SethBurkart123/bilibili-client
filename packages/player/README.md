@@ -100,6 +100,34 @@ Fetched form `{ source, headers }` also exists in FastStream but is unused here 
 
 When `subtitles` is omitted, the payload still sends `subtitles: []` (never `undefined`).
 
+**Prefer initial-feed subtitles** (`feedPlayer(..., { subtitles })`) for any tracks known up front. That attaches captions with the source and avoids a separate round-trip.
+
+### Runtime subtitle injection
+
+To add tracks to a **playing** iframe without reloading or re-feeding the source (e.g. a just-translated English track), use `addSubtitleTracks`:
+
+```ts
+import { addSubtitleTracks } from "@bili/player";
+
+addSubtitleTracks(
+  iframe,
+  [{ label: "English", language: "en", vtt }],
+  { activateLabel: "English" }, // optional: activate the matching label
+);
+```
+
+Wire shape (same-origin `postMessage`; handled by a small vendored patch in `main.mjs`):
+
+```ts
+{
+  type: "subtitles",
+  subtitles: [{ label, language, data }], // data = WebVTT text
+  activateLabel?: string,
+}
+```
+
+This path does **not** call `recieveSources` / clear / re-set the media source.
+
 ### Re-feed and track persistence
 
 Re-feeding (e.g. when the user enables captions) posts another `{ type: "sources", ... }` message. In `recieveSources` (`main.mjs`):
@@ -107,7 +135,7 @@ Re-feeding (e.g. when the user enables captions) posts another `{ type: "sources
 - If the player **already has a source**, local `autoSetSource` is nulled, so `clearSubtitles()` does **not** run.
 - New tracks from the re-feed are still loaded via `loadSubtitleTrack(track, request.autoSetSource)`.
 
-**Previously loaded subtitle tracks therefore persist** across a re-feed; new tracks are appended rather than replacing the list. Prefer feeding captions on the first load when possible, or accept accumulation if you re-feed with `subtitles` after an earlier captioned feed.
+**Previously loaded subtitle tracks therefore persist** across a re-feed; new tracks are appended rather than replacing the list. Prefer `feedPlayer` initial-feed or `addSubtitleTracks` over re-feeding just to attach captions.
 
 ## Demo
 
@@ -117,7 +145,7 @@ bun packages/player/scripts/demo.ts
 # open http://localhost:4321/
 ```
 
-Click **Load Big Buck Bunny (DASH)** to post a public Akamai test MPD URL into the iframe.
+Click **Load Big Buck Bunny (DASH)** to post a public Akamai test MPD URL into the iframe. After the stream is playing, **Add subtitle track** calls `addSubtitleTracks` with a tiny hardcoded VTT (no source reload).
 
 ## API
 
@@ -126,6 +154,7 @@ Click **Load Big Buck Bunny (DASH)** to post a public Akamai test MPD URL into t
 | `buildMpd(dash)` | Pure `DashInfo` → static MPD XML (Bilibili2Dash port) |
 | `mpdToDataUri(mpd)` | `data:application/dash+xml;base64,...` |
 | `feedPlayer(iframe, mpdXml, opts?)` | Same-origin `postMessage` into FastStream; `opts.subtitles` optional |
+| `addSubtitleTracks(iframe, tracks, opts?)` | Runtime subtitle injection without source reload |
 | `subtitleLinesToVtt(lines, opts?)` | `SubtitleLine[]` → WebVTT string |
 | `mergeDualLines(original, translated)` | Dual-line merge (`translated\\noriginal`); throws on length mismatch |
 | `ACCELERATED_DASH` | `"accelerated_dash"` |

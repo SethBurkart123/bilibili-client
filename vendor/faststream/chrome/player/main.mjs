@@ -347,6 +347,25 @@ async function setup() {
         loadOptions();
       } else if (e.data?.type === 'sources') {
         recieveSources(e.data, () => {});
+      } else if (e.data?.type === 'subtitles') {
+        // bilibili-client patch: runtime subtitle injection
+        if (!window.fastStream) return;
+        const subs = e.data.subtitles || [];
+        const activateLabel = e.data.activateLabel;
+        for (const sub of subs) {
+          const track = new SubtitleTrack(sub.label, sub.language);
+          try {
+            track.loadText(sub.data);
+            if (track.cues.length > 0) {
+              const returned = window.fastStream.loadSubtitleTrack(track, false);
+              if (activateLabel && sub.label === activateLabel) {
+                window.fastStream.interfaceController.subtitlesManager.activateTrack(returned);
+              }
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        }
       }
     });
   }
