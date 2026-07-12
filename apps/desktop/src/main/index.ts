@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { BrowserWindow, app, ipcMain, session, shell } from "electron";
 import type { BiliBridge } from "./services/bridge";
-import { service } from "./services";
+import { flushService, service } from "./services";
 
 const DESKTOP_CHROME_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -98,4 +98,18 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+let allowingQuit = false;
+app.on("before-quit", (event) => {
+  if (allowingQuit) return;
+  event.preventDefault();
+  void flushService()
+    .catch((err: unknown) => {
+      console.error("Failed to flush translation cache:", err);
+    })
+    .finally(() => {
+      allowingQuit = true;
+      app.quit();
+    });
 });

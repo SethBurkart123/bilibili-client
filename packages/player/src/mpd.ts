@@ -72,8 +72,18 @@ export function buildMpd(dash: DashInfo): string {
   return `<?xml version="1.0" encoding="utf-8"?>${mpd}`;
 }
 
+/** UTF-8 → base64 without Node `Buffer` (renderer / DOM-safe). */
+function utf8ToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 /** Encode an MPD string as a data URI for FastStream VideoSource. */
 export function mpdToDataUri(mpd: string): string {
-  const base64 = Buffer.from(mpd, "utf8").toString("base64");
-  return `data:application/dash+xml;base64,${base64}`;
+  return `data:application/dash+xml;base64,${utf8ToBase64(mpd)}`;
 }

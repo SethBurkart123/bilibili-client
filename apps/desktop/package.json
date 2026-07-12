@@ -5,11 +5,17 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
+    "sync-player": "bun scripts/sync-player.ts",
+    "predev": "bun run sync-player",
     "dev": "electron-vite dev",
+    "prebuild": "bun run sync-player",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
+    "@bili/api": "workspace:*",
+    "@bili/player": "workspace:*",
+    "@bili/translate": "workspace:*",
     "@bili/types": "workspace:*"
   },
   "devDependencies": {

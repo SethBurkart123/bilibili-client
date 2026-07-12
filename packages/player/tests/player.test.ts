@@ -156,6 +156,13 @@ describe("mpdToDataUri", () => {
     const b64 = uri.slice("data:application/dash+xml;base64,".length);
     expect(Buffer.from(b64, "base64").toString("utf8")).toBe(mpd);
   });
+
+  test("encodes non-ASCII without Node Buffer", () => {
+    const mpd = '<?xml version="1.0"?><MPD title="测试 / café"/>';
+    const uri = mpdToDataUri(mpd);
+    const b64 = uri.slice("data:application/dash+xml;base64,".length);
+    expect(Buffer.from(b64, "base64").toString("utf8")).toBe(mpd);
+  });
 });
 
 describe("feedPlayer", () => {
