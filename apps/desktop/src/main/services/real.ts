@@ -28,6 +28,7 @@ import {
   saveSessionCookies,
 } from "./session-store";
 import { loadSettings, saveSettings } from "./settings-store";
+import { StreamProxy } from "./stream-proxy";
 
 function translationsCachePath(): string {
   return join(app.getPath("userData"), "translations.json");
@@ -66,6 +67,7 @@ function buildTranslator(
 export class RealBiliService implements BiliBridge {
   private readonly client = new BiliClient();
   private readonly cache = new JsonFileCache(translationsCachePath());
+  private readonly streamProxy = new StreamProxy();
   private settings: TranslatorSettings = loadSettings();
   private translator: Translator = buildTranslator(this.settings, this.cache);
 
@@ -81,7 +83,11 @@ export class RealBiliService implements BiliBridge {
   }
 
   async flush(): Promise<void> {
-    await this.cache.flush();
+    try {
+      await this.cache.flush();
+    } finally {
+      await this.streamProxy.stop();
+    }
   }
 
   async resolveVideo(url: string): Promise<VideoInfo> {
@@ -94,7 +100,15 @@ export class RealBiliService implements BiliBridge {
     cid: number,
   ): Promise<{ playUrl: PlayUrlResult; mpdXml: string }> {
     const playUrl = await this.client.getPlayUrl(id, cid);
-    return { playUrl, mpdXml: buildMpd(playUrl.dash) };
+    await this.streamProxy.start();
+    const dash = structuredClone(playUrl.dash);
+    for (const tracks of [dash.video, dash.audio]) {
+      for (const track of tracks) {
+        track.baseUrl = proxyUrlForTrack(this.streamProxy, track.baseUrl, track.backupUrl);
+        track.backupUrl = [];
+      }
+    }
+    return { playUrl, mpdXml: buildMpd(dash) };
   }
 
   async getComments(aid: number, offset: string | null) {
@@ -165,4 +179,12 @@ export class RealBiliService implements BiliBridge {
     await this.client.logout();
     clearSessionCookies();
   }
+}
+
+function proxyUrlForTrack(proxy: StreamProxy, baseUrl: string, backupUrl: string[]): string {
+  const url = new URL(proxy.urlFor(baseUrl));
+  if (backupUrl.length > 0) {
+    url.searchParams.set("b", Buffer.from(JSON.stringify(backupUrl)).toString("base64url"));
+  }
+  return url.toString();
 }
