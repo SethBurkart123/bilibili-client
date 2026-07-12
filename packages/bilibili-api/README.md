@@ -15,3 +15,23 @@ const comments = await bili.getComments(video.aid, null);
 
 Pass `cookies`, `userAgent`, or a custom `fetch` to the constructor when needed.
 Use `getCookies()` and `setCookies()` to persist the cookie snapshot.
+
+## QR login
+
+Start a login, render its URL as a QR code, then poll until it succeeds or
+expires. On success the client captures the returned session cookies before the
+poll promise resolves; persist them with `getCookies()` if the session should
+survive a restart.
+
+```ts
+const qr = await bili.loginQrStart();
+renderQrCode(qr.url);
+
+const timer = setInterval(async () => {
+  const { status } = await bili.loginQrPoll(qr.qrcodeKey);
+  if (status === "waiting" || status === "scanned") return;
+  clearInterval(timer);
+  if (status === "success") saveCookies(bili.getCookies());
+  // status === "expired": start again with loginQrStart().
+}, 1_000);
+```

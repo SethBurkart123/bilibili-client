@@ -3,6 +3,8 @@ import type {
   CommentPage,
   DashTrack,
   PlayUrlResult,
+  SubtitleLine,
+  SubtitleTrackInfo,
   VideoInfo,
 } from "@bili/types";
 
@@ -148,4 +150,35 @@ export function normalizeReplyPage(data: unknown, pn: number): CommentPage {
     isEnd: size === 0 || pn * size >= count,
     allCount: count,
   };
+}
+
+export function normalizeSubtitles(data: unknown): SubtitleTrackInfo[] {
+  const source = object(data);
+  const subtitle = object(source.subtitle);
+  return array(subtitle.subtitles).map((track) => {
+    const value = object(track);
+    const lan = string(value.lan);
+    const url = string(value.subtitle_url);
+    const type = value.type;
+    const aiType = value.ai_type;
+    return {
+      lan,
+      lanDoc: string(value.lan_doc),
+      url: url.startsWith("//") ? `https:${url}` : url,
+      aiGenerated: lan.startsWith("ai-") || type === 1 || type === true || aiType === 1 || aiType === true,
+    };
+  });
+}
+
+export function normalizeSubtitleLines(data: unknown): SubtitleLine[] {
+  const source = object(data);
+  return array(source.body).map((line) => {
+    const value = object(line);
+    const from = number(value.from);
+    return {
+      from,
+      to: value.to === undefined || value.to === null ? from + 2 : number(value.to),
+      content: string(value.content),
+    };
+  });
 }

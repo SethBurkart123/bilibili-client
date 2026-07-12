@@ -1,10 +1,36 @@
-import type { CommentPage, PlayUrlResult, VideoId, VideoInfo } from "@bili/types";
-import { normalizeCommentPage, normalizePlayUrl, normalizeReplyPage, normalizeVideoInfo } from "./normalizers.js";
+import type {
+  CommentPage,
+  LoginPollResult,
+  LoginPollStatus,
+  LoginQr,
+  LoginState,
+  PlayUrlResult,
+  SubtitleLine,
+  SubtitleTrackInfo,
+  VideoId,
+  VideoInfo,
+} from "@bili/types";
+import {
+  normalizeCommentPage,
+  normalizePlayUrl,
+  normalizeReplyPage,
+  normalizeSubtitleLines,
+  normalizeSubtitles,
+  normalizeVideoInfo,
+} from "./normalizers.js";
 import { encWbi, type WbiParams } from "./wbi.js";
 
 export const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const API_ORIGIN = "https://api.bilibili.com";
+const PASSPORT_ORIGIN = "https://passport.bilibili.com";
+const SESSION_COOKIE_NAMES = new Set(["SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid"]);
+const LOGIN_POLL_STATUSES = new Map<number, LoginPollStatus>([
+  [86101, "waiting"],
+  [86090, "scanned"],
+  [86038, "expired"],
+  [0, "success"],
+]);
 
 export class BiliApiError extends Error {
   constructor(
@@ -32,6 +58,11 @@ interface ApiEnvelope {
   code?: unknown;
   message?: unknown;
   data?: unknown;
+}
+
+interface ApiResponse {
+  data: unknown;
+  response: Response;
 }
 
 interface ReplyFallbackCursor {
@@ -83,6 +114,10 @@ function replyFallbackCursor(offset: string | null): ReplyFallbackCursor | null 
     // Server-issued offsets are opaque and need not be JSON understood by this client.
   }
   return null;
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
 export class BiliClient {
@@ -190,6 +225,53 @@ export class BiliClient {
     );
   }
 
+  async loginQrStart(): Promise<LoginQr> {
+    const data = object(await this.request("/x/passport-login/web/qrcode/generate", {}, [], PASSPORT_ORIGIN));
+    return { url: String(data.url ?? ""), qrcodeKey: String(data.qrcode_key ?? "") };
+  }
+
+  async loginQrPoll(qrcodeKey: string): Promise<LoginPollResult> {
+    const { data, response } = await this.requestWithResponse(
+      "/x/passport-login/web/qrcode/poll",
+      { qrcode_key: qrcodeKey },
+      [],
+      PASSPORT_ORIGIN,
+    );
+    const result = object(data);
+    const code = Number(result.code);
+    const status = LOGIN_POLL_STATUSES.get(code);
+    if (!status) throw new BiliApiError(code || -1, JSON.stringify(result));
+    if (status === "success") {
+      this.captureSessionCookies(response, result.url);
+      await this.refreshWbiKeys();
+    }
+    return { status };
+  }
+
+  async getLoginState(): Promise<LoginState> {
+    const data = object(await this.request("/x/web-interface/nav", {}, [-101]));
+    if (!data.isLogin) return { loggedIn: false };
+    return {
+      loggedIn: true,
+      uname: String(data.uname ?? ""),
+      mid: Number(data.mid) || 0,
+      face: String(data.face ?? ""),
+    };
+  }
+
+  async logout(): Promise<void> {
+    for (const name of SESSION_COOKIE_NAMES) this.cookies.delete(name);
+  }
+
+  async getSubtitles(id: VideoId, cid: number): Promise<SubtitleTrackInfo[]> {
+    return normalizeSubtitles(await this.signedRequest("/x/player/wbi/v2", { ...this.videoParams(id), cid }));
+  }
+
+  async getSubtitleLines(url: string): Promise<SubtitleLine[]> {
+    const response = await this.fetchImpl(url, { headers: this.headers() });
+    return normalizeSubtitleLines(await response.json());
+  }
+
   private async getCommentReplyPage(aid: number, cursor: ReplyFallbackCursor): Promise<CommentPage> {
     const root = cursor.roots[cursor.rootIndex];
     if (root === undefined) return { items: [], nextOffset: null, isEnd: true, allCount: cursor.allCount };
@@ -241,14 +323,49 @@ export class BiliClient {
     return headers;
   }
 
-  private async request(path: string, params: WbiParams = {}, allowedCodes: number[] = []): Promise<unknown> {
-    const url = new URL(path, API_ORIGIN);
+  private captureSessionCookies(response: Response, url: unknown): void {
+    const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+    const setCookies = headers.getSetCookie?.() ?? (headers.get("set-cookie") ? [headers.get("set-cookie")!] : []);
+    for (const cookie of setCookies) {
+      const pair = cookie.slice(0, cookie.indexOf(";") === -1 ? cookie.length : cookie.indexOf(";"));
+      const separator = pair.indexOf("=");
+      if (separator === -1) continue;
+      const name = pair.slice(0, separator);
+      const value = pair.slice(separator + 1);
+      if (name && SESSION_COOKIE_NAMES.has(name)) this.cookies.set(name, value);
+    }
+    try {
+      const params = new URL(String(url)).searchParams;
+      for (const name of SESSION_COOKIE_NAMES) {
+        if (!this.cookies.has(name) && params.has(name)) this.cookies.set(name, params.get(name)!);
+      }
+    } catch {
+      // A missing/empty success URL is valid when Set-Cookie carried the session.
+    }
+  }
+
+  private async request(
+    path: string,
+    params: WbiParams = {},
+    allowedCodes: number[] = [],
+    origin = API_ORIGIN,
+  ): Promise<unknown> {
+    return (await this.requestWithResponse(path, params, allowedCodes, origin)).data;
+  }
+
+  private async requestWithResponse(
+    path: string,
+    params: WbiParams = {},
+    allowedCodes: number[] = [],
+    origin = API_ORIGIN,
+  ): Promise<ApiResponse> {
+    const url = new URL(path, origin);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
     const response = await this.fetchImpl(url, { headers: this.headers() });
     const body = (await response.json()) as ApiEnvelope;
     if (body.code !== 0 && !allowedCodes.includes(Number(body.code))) {
       throw new BiliApiError(Number(body.code) || -1, JSON.stringify(body));
     }
-    return body.data;
+    return { data: body.data, response };
   }
 }
