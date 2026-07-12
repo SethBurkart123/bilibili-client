@@ -72,6 +72,27 @@ try {
     if (lines.length === 0) throw new Error("first subtitle track has no lines");
     pass(`getSubtitleLines -> ${lines[0].content}`);
   }
+
+  const channel = await client.getChannelInfo(view.owner.mid);
+  if (!channel.name) throw new Error("channel is missing a name");
+  pass(`getChannelInfo -> ${channel.name} (${channel.follower ?? 0} followers)`);
+
+  const channelVideos = await client.getChannelVideos(view.owner.mid, 1);
+  if (channelVideos.items.length === 0 || channelVideos.items.some((item) => !item.bvid || !item.title)) {
+    throw new Error("channel videos are missing bvids or titles");
+  }
+  pass(`getChannelVideos -> ${channelVideos.items.slice(0, 3).map((item) => item.title).join(" | ")} (${channelVideos.total} total)`);
+
+  const videoSearch = await client.searchVideos("扫描隧道显微镜", 1);
+  if (videoSearch.items.length === 0 || videoSearch.items.some((item) => item.title.includes("<em"))) {
+    throw new Error("video search is empty or retains highlight markup");
+  }
+  pass(`searchVideos -> ${videoSearch.items.slice(0, 2).map((item) => item.title).join(" | ")}`);
+
+  const userSearch = await client.searchUsers("机械小熊猫", 1);
+  const matchingUser = userSearch.items.find((item) => item.name.includes("机械小熊猫"));
+  if (!matchingUser) throw new Error("matching channel was not found in user search");
+  pass(`searchUsers -> ${matchingUser.mid}/${matchingUser.name} (${matchingUser.followers} followers)`);
 } catch (error) {
   fail("live acceptance", error);
 }
