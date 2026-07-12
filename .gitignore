@@ -8,3 +8,4 @@ package-lock.json
 *.log
 .DS_Store
 apps/desktop/src/renderer/public/player/
+*.tsbuildinfo

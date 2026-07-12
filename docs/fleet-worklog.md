@@ -62,3 +62,13 @@ review at integration only if warranted.
   ("Scan with the bilibili app"), login indicator opens settings, playback alive (readyState
   4, t advancing). NOT verifiable headless: actual phone-scan login + logged-in ai-zh
   captions + 1080p unlock — needs the user.
+- ROUND 3 (captions rework + backend media) COMPLETE @ 72eb7a3:
+  stream-proxy lane (codex): loopback proxy, allowlist, Range fidelity, live 206. Orchestrator
+  added CORS (player iframe is cross-origin to 127.0.0.1 — root cause of dead playback).
+  runtime-subs lane (cursor): vendor postMessage handler for live subtitle injection.
+  captions-ui lane (cursor): originals fed with source into FastStream CC UI; reload path
+  deleted; opt-in "Translate captions" button injects English+Dual live.
+  fix-injection agent root cause: DEPLOYED PLAYER DIST PREDATED THE VENDOR PATCH (sync-player
+  reuses stale dist — always build-player before sync after vendor edits). Handler hardened.
+  Headed e2e: 1080p playing (login), 100% media via 127.0.0.1 proxy (0 direct CDN), tracks
+  ["中文 (AI)","English (translated)","Dual (EN + 中文)"] injected with player untouched.
