@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@bili/player demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #0f1419;
+        --fg: #e7ecf1;
+        --accent: #00a1d6;
+        --panel: #1a2332;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background: radial-gradient(1200px 600px at 20% -10%, #1b3a4b 0%, var(--bg) 55%);
+        color: var(--fg);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 1rem 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: 0.02em;
+      }
+      button {
+        appearance: none;
+        border: 0;
+        background: var(--accent);
+        color: #041018;
+        font: inherit;
+        font-weight: 600;
+        padding: 0.55rem 1rem;
+        cursor: pointer;
+      }
+      button:hover {
+        filter: brightness(1.08);
+      }
+      .frame-wrap {
+        flex: 1;
+        margin: 0 1.25rem 1.25rem;
+        background: var(--panel);
+        min-height: 0;
+      }
+      iframe {
+        width: 100%;
+        height: calc(100vh - 5rem);
+        border: 0;
+        display: block;
+        background: #000;
+      }
+      p {
+        margin: 0;
+        opacity: 0.75;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>@bili/player · FastStream embed</h1>
+      <button type="button" id="play">Load Big Buck Bunny (DASH)</button>
+      <p id="status">Same-origin iframe · postMessage type=sources</p>
+    </header>
+    <div class="frame-wrap">
+      <iframe
+        id="player"
+        src="/player/player/index.html"
+        title="FastStream player"
+        allow="autoplay; fullscreen"
+      ></iframe>
+    </div>
+    <script type="module">
+      // ACCELERATED_DASH from vendor PlayerModes.mjs — mirrored for the demo URL source.
+      const ACCELERATED_DASH = "accelerated_dash";
+
+      // Public DASH-IF / Akamai Big Buck Bunny test manifest.
+      const SAMPLE_MPD =
+        "https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd";
+
+      const iframe = document.getElementById("player");
+      const status = document.getElementById("status");
+      const btn = document.getElementById("play");
+
+      /**
+       * Same payload shape as feedPlayer() / recieveSources in main.mjs.
+       * Demo uses a direct https MPD URL (URL source is valid for Visual check).
+       */
+      function feedUrlSource(url) {
+        iframe.contentWindow.postMessage(
+          {
+            type: "sources",
+            sources: [
+              {
+                url,
+                mode: ACCELERATED_DASH,
+                headers: {},
+              },
+            ],
+            autoSetSource: true,
+            subtitles: [],
+          },
+          window.location.origin,
+        );
+      }
+
+      btn.addEventListener("click", () => {
+        status.textContent = `Feeding ${SAMPLE_MPD}`;
+        feedUrlSource(SAMPLE_MPD);
+      });
+    </script>
+  </body>
+</html>
