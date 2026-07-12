@@ -158,6 +158,47 @@ export interface TranslatorSettings {
   openai?: { baseURL: string; apiKey: string; model: string };
 }
 
+// ---------- subtitles ----------
+
+export interface SubtitleTrackInfo {
+  /** language code, e.g. "zh-CN", "ai-zh" */
+  lan: string;
+  /** human-readable language label */
+  lanDoc: string;
+  /** subtitle JSON url (may be protocol-relative upstream; normalized to https) */
+  url: string;
+  aiGenerated: boolean;
+}
+
+export interface SubtitleLine {
+  /** start time in seconds */
+  from: number;
+  /** end time in seconds */
+  to: number;
+  content: string;
+}
+
+// ---------- login (QR) ----------
+
+export interface LoginQr {
+  /** content to render as a QR code */
+  url: string;
+  qrcodeKey: string;
+}
+
+export type LoginPollStatus = "waiting" | "scanned" | "expired" | "success";
+
+export interface LoginPollResult {
+  status: LoginPollStatus;
+}
+
+export interface LoginState {
+  loggedIn: boolean;
+  uname?: string;
+  mid?: number;
+  face?: string;
+}
+
 // ---------- Electron IPC bridge (renderer -> main) ----------
 // Exposed on window.bili by the preload script. The desktop app implements
 // this against mocks during the fleet run; integration swaps in real services.
@@ -173,4 +214,13 @@ export interface BiliBridge {
   translate(texts: string[], opts?: TranslateOptions): Promise<string[]>;
   getSettings(): Promise<TranslatorSettings>;
   setSettings(s: TranslatorSettings): Promise<void>;
+  /** subtitle tracks for a part; empty when the video has none (common) */
+  getSubtitles(id: VideoId, cid: number): Promise<SubtitleTrackInfo[]>;
+  /** fetch + parse a subtitle track's timed lines */
+  getSubtitleLines(url: string): Promise<SubtitleLine[]>;
+  loginQrStart(): Promise<LoginQr>;
+  /** on "success" the main process persists session cookies before resolving */
+  loginQrPoll(qrcodeKey: string): Promise<LoginPollResult>;
+  getLoginState(): Promise<LoginState>;
+  logout(): Promise<void>;
 }
