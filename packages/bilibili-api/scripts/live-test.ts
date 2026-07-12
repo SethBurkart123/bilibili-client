@@ -55,6 +55,23 @@ try {
   const seenIds = new Set([...firstPageIds, ...secondPage.items.map((item) => item.rpid)]);
   if (thirdPage.items.length === 0 || thirdPage.items.some((item) => seenIds.has(item.rpid))) throw new Error("third comments page overlaps an earlier page");
   pass("getComments page 3 -> non-empty with no overlap");
+
+  const qr = await client.loginQrStart();
+  if (!qr.url || qr.qrcodeKey.length !== 32) throw new Error("QR start is missing a URL or 32-character key");
+  const poll = await client.loginQrPoll(qr.qrcodeKey);
+  if (poll.status !== "waiting") throw new Error(`expected immediate QR poll to wait, got ${poll.status}`);
+  pass("loginQrStart + immediate loginQrPoll -> waiting");
+
+  const subtitles = await client.getSubtitles(id, view.cid);
+  if (!Array.isArray(subtitles) || subtitles.some((track) => typeof track.lan !== "string" || typeof track.url !== "string")) {
+    throw new Error("subtitle track response has an invalid shape");
+  }
+  pass(`getSubtitles -> ${JSON.stringify(subtitles)}`);
+  if (subtitles[0]) {
+    const lines = await client.getSubtitleLines(subtitles[0].url);
+    if (lines.length === 0) throw new Error("first subtitle track has no lines");
+    pass(`getSubtitleLines -> ${lines[0].content}`);
+  }
 } catch (error) {
   fail("live acceptance", error);
 }

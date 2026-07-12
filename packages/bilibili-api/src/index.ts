@@ -7,6 +7,12 @@ export type {
   DashSegmentBase,
   DashTrack,
   PlayUrlResult,
+  LoginPollResult,
+  LoginPollStatus,
+  LoginQr,
+  LoginState,
+  SubtitleLine,
+  SubtitleTrackInfo,
   VideoId,
   VideoInfo,
 } from "@bili/types";
