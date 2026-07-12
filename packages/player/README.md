@@ -66,6 +66,49 @@ feedPlayer(iframe, mpdXml, {
 
 `mode` is `PlayerModes.ACCELERATED_DASH` (`"accelerated_dash"`) from the vendored player.
 
+## Subtitles
+
+Convert Bilibili `SubtitleLine[]` (`from`/`to` in seconds) to WebVTT, optionally merge a translation on top, then pass tracks into `feedPlayer`:
+
+```ts
+import {
+  buildMpd,
+  feedPlayer,
+  mergeDualLines,
+  subtitleLinesToVtt,
+} from "@bili/player";
+import type { SubtitleLine } from "@bili/types";
+
+const lines: SubtitleLine[] = /* from getSubtitleLines */;
+const dual = mergeDualLines(lines, translations); // translated\noriginal
+const vtt = subtitleLinesToVtt(dual, { label: "Bilingual" });
+
+feedPlayer(iframe, mpdXml, {
+  subtitles: [
+    { label: "Bilingual", language: "zh-CN", vtt },
+  ],
+});
+```
+
+Each opts entry is mapped to FastStream's **inline** subtitle shape (`main.mjs` `recieveSources` / `loadSubtitles`):
+
+```ts
+{ label: string; language: string; data: string } // data = WebVTT text
+```
+
+Fetched form `{ source, headers }` also exists in FastStream but is unused here (extension-oriented). FastStream parses WebVTT natively; non-VTT text is run through `srt2webvtt`. Full ASS is not supported.
+
+When `subtitles` is omitted, the payload still sends `subtitles: []` (never `undefined`).
+
+### Re-feed and track persistence
+
+Re-feeding (e.g. when the user enables captions) posts another `{ type: "sources", ... }` message. In `recieveSources` (`main.mjs`):
+
+- If the player **already has a source**, local `autoSetSource` is nulled, so `clearSubtitles()` does **not** run.
+- New tracks from the re-feed are still loaded via `loadSubtitleTrack(track, request.autoSetSource)`.
+
+**Previously loaded subtitle tracks therefore persist** across a re-feed; new tracks are appended rather than replacing the list. Prefer feeding captions on the first load when possible, or accept accumulation if you re-feed with `subtitles` after an earlier captioned feed.
+
 ## Demo
 
 ```bash
@@ -82,5 +125,7 @@ Click **Load Big Buck Bunny (DASH)** to post a public Akamai test MPD URL into t
 |--------|------|
 | `buildMpd(dash)` | Pure `DashInfo` → static MPD XML (Bilibili2Dash port) |
 | `mpdToDataUri(mpd)` | `data:application/dash+xml;base64,...` |
-| `feedPlayer(iframe, mpdXml, opts?)` | Same-origin `postMessage` into FastStream |
+| `feedPlayer(iframe, mpdXml, opts?)` | Same-origin `postMessage` into FastStream; `opts.subtitles` optional |
+| `subtitleLinesToVtt(lines, opts?)` | `SubtitleLine[]` → WebVTT string |
+| `mergeDualLines(original, translated)` | Dual-line merge (`translated\\noriginal`); throws on length mismatch |
 | `ACCELERATED_DASH` | `"accelerated_dash"` |

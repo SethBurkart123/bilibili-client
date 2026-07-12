@@ -6,8 +6,22 @@ import { mpdToDataUri } from "./mpd";
  */
 export const ACCELERATED_DASH = "accelerated_dash" as const;
 
+/** Inline subtitle track for FastStream `recieveSources` (data = WebVTT text). */
+export interface FeedSubtitleTrack {
+  label: string;
+  language: string;
+  /** WebVTT document text (becomes `data` on the wire). */
+  vtt: string;
+}
+
 export interface FeedPlayerOptions {
   headers?: Record<string, string>;
+  /**
+   * Subtitle tracks to attach. Mapped to FastStream's inline shape
+   * `{ label, language, data }` where `data` is the VTT text.
+   * When omitted, the payload still sends `subtitles: []`.
+   */
+  subtitles?: FeedSubtitleTrack[];
 }
 
 /**
@@ -31,6 +45,13 @@ export function feedPlayer(
     throw new Error("feedPlayer: iframe has no contentWindow");
   }
 
+  const subtitles =
+    opts?.subtitles?.map((t) => ({
+      label: t.label,
+      language: t.language,
+      data: t.vtt,
+    })) ?? [];
+
   const message = {
     type: "sources" as const,
     sources: [
@@ -43,7 +64,7 @@ export function feedPlayer(
     // Without autoSetSource, recieveSources nulls the chosen source and never
     // calls addSource(..., true) as current.
     autoSetSource: true,
-    subtitles: [] as [],
+    subtitles,
   };
 
   const origin = globalThis.location?.origin;
