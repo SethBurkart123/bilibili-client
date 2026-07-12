@@ -1,0 +1,20 @@
+{
+  "name": "@bili/api",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "live-test": "bun scripts/live-test.ts"
+  },
+  "dependencies": {
+    "@bili/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
